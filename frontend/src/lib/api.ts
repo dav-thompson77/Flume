@@ -12,8 +12,7 @@ export class ApiError extends Error {
 
 /**
  * Thin wrapper around `fetch` that targets the Flume FastAPI backend.
- * `path` should start with `/` and include the `/api/v1` prefix when hitting
- * versioned routes, e.g. `apiFetch("/api/v1/health")`.
+ * `path` should start with `/`, e.g. `apiFetch("/health")`.
  */
 export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${API_BASE_URL}${path}`, {

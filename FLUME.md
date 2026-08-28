@@ -36,9 +36,8 @@ See `frontend/README.md` and `backend/README.md` for service-specific details.
 - The frontend is a static/SSR Next.js app; API calls are made client-side (or from Server
   Components/Route Handlers as needed) through the small fetch wrapper in
   `frontend/src/lib/api.ts`.
-- The backend exposes versioned routes under `/api/v1/*` (see `backend/app/api/router.py`).
-  `GET /api/v1/health` is used both by the frontend's status indicator and by Railway's
-  healthcheck.
+- The backend exposes its routes via `backend/app/api/router.py`. `GET /health` is used both by
+  the frontend's status indicator and by Railway's healthcheck.
 
 ## Local development
 
