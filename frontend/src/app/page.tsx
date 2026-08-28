@@ -3,7 +3,7 @@
 import { useRef, useState } from "react";
 import type { ChangeEvent, DragEvent, FormEvent } from "react";
 import { useRouter } from "next/navigation";
-import { AlertCircle, Droplets, FileImage, FileSpreadsheet, UploadCloud, X } from "lucide-react";
+import { AlertCircle, FileImage, FileSpreadsheet, UploadCloud, X } from "lucide-react";
 
 const ACCEPTED_MIME_TYPES = ["image/jpeg", "image/png", "text/csv"];
 const ACCEPTED_EXTENSIONS = [".jpg", ".jpeg", ".png", ".csv"];
@@ -117,12 +117,7 @@ export default function Home() {
     <main className="flex flex-1 justify-center px-6 py-12 sm:px-8 sm:py-16 lg:py-24">
       <div className="mx-auto flex w-full max-w-content flex-col items-center">
         <header className="flex flex-col items-center gap-2 text-center">
-          <div className="flex items-center gap-2">
-            <span className="flex h-8 w-8 items-center justify-center rounded-badge bg-accent/10 text-accent">
-              <Droplets className="h-4 w-4" aria-hidden="true" />
-            </span>
-            <span className="text-lg font-bold tracking-tight text-foreground">Flume</span>
-          </div>
+          <span className="text-2xl font-bold tracking-tight text-foreground">Flume</span>
           <p className="text-xs font-semibold uppercase tracking-widest text-foreground-muted">
             AI Credit Underwriting
           </p>
