@@ -39,24 +39,37 @@ export default function Home() {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [merchantName, setMerchantName] = useState("");
-  const [file, setFile] = useState<File | null>(null);
+  const [files, setFiles] = useState<File[]>([]);
   const [isDragging, setIsDragging] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const canAnalyze = merchantName.trim().length > 0 && file !== null;
+  const canAnalyze = merchantName.trim().length > 0 && files.length > 0;
 
-  function acceptFile(candidate: File | undefined | null) {
-    if (!candidate) return;
-    if (!isAcceptedFile(candidate)) {
-      setError("Only JPG, PNG, and CSV files are supported.");
-      return;
+  function acceptFiles(candidates: FileList | File[] | undefined | null) {
+    if (!candidates || candidates.length === 0) return;
+
+    const incoming = Array.from(candidates);
+    const accepted = incoming.filter(isAcceptedFile);
+    const rejected = incoming.filter((candidate) => !isAcceptedFile(candidate));
+
+    if (accepted.length > 0) {
+      setFiles((prev) => [...prev, ...accepted]);
     }
-    setError(null);
-    setFile(candidate);
+
+    if (rejected.length > 0) {
+      setError(
+        rejected.length === 1
+          ? `"${rejected[0].name}" is not a supported file type. Only JPG, PNG, and CSV files are supported.`
+          : `${rejected.length} files are not a supported file type. Only JPG, PNG, and CSV files are supported.`,
+      );
+    } else {
+      setError(null);
+    }
   }
 
   function handleInputChange(event: ChangeEvent<HTMLInputElement>) {
-    acceptFile(event.target.files?.[0]);
+    acceptFiles(event.target.files);
+    if (fileInputRef.current) fileInputRef.current.value = "";
   }
 
   function handleDragOver(event: DragEvent<HTMLDivElement>) {
@@ -71,13 +84,11 @@ export default function Home() {
   function handleDrop(event: DragEvent<HTMLDivElement>) {
     event.preventDefault();
     setIsDragging(false);
-    acceptFile(event.dataTransfer.files?.[0]);
+    acceptFiles(event.dataTransfer.files);
   }
 
-  function handleRemoveFile() {
-    setFile(null);
-    setError(null);
-    if (fileInputRef.current) fileInputRef.current.value = "";
+  function handleRemoveFile(index: number) {
+    setFiles((prev) => prev.filter((_, i) => i !== index));
   }
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -87,31 +98,31 @@ export default function Home() {
       setError("Enter the merchant's business name.");
       return;
     }
-    if (!file) {
-      setError("Select a receipt image or CSV file to continue.");
+    if (files.length === 0) {
+      setError("Select at least one receipt image or CSV file to continue.");
       return;
     }
 
     const applicationId = generateApplicationId();
 
     // No backend yet: stash what the processing page needs to display
-    // (merchant name + filename only, never the file itself) so this
+    // (merchant name + file metadata, never the file contents) so this
     // stage stays entirely client-side.
     sessionStorage.setItem(
       `flume:application:${applicationId}`,
       JSON.stringify({
         merchantName: merchantName.trim(),
-        fileName: file.name,
-        fileType: file.type,
-        fileSize: file.size,
+        files: files.map((selected) => ({
+          name: selected.name,
+          type: selected.type,
+          size: selected.size,
+        })),
         createdAt: new Date().toISOString(),
       }),
     );
 
     router.push(`/processing/${applicationId}`);
   }
-
-  const FileTypeIcon = file && isCsvFile(file) ? FileSpreadsheet : FileImage;
 
   return (
     <main className="flex flex-1 justify-center px-6 py-12 sm:px-8 sm:py-16 lg:py-24">
@@ -155,7 +166,7 @@ export default function Home() {
             <p className="text-xs text-foreground-muted">Enter the business being assessed.</p>
           </div>
 
-          <div className="flex flex-col gap-2">
+          <div className="flex flex-col gap-3">
             <div
               onDragOver={handleDragOver}
               onDragLeave={handleDragLeave}
@@ -172,50 +183,63 @@ export default function Home() {
                 name="file-upload"
                 type="file"
                 accept={ACCEPT_ATTRIBUTE}
+                multiple
                 onChange={handleInputChange}
                 className="sr-only"
               />
 
-              {!file ? (
-                <label
-                  htmlFor="file-upload"
-                  className="flex cursor-pointer flex-col items-center gap-3 px-6 py-10 text-center transition-colors duration-200 hover:border-accent"
-                >
-                  <span className="flex h-12 w-12 items-center justify-center rounded-full bg-accent/10 text-accent">
-                    <UploadCloud className="h-6 w-6" aria-hidden="true" />
-                  </span>
-                  <span className="text-sm font-semibold text-foreground">
-                    Upload financial records
-                  </span>
-                  <span className="max-w-xs text-sm text-foreground-secondary">
-                    Drag and drop a receipt image or CSV file here, or browse your files.
-                  </span>
-                  <span className="text-xs text-foreground-muted">JPG, PNG, CSV</span>
-                </label>
-              ) : (
-                <div className="flex items-center justify-between gap-4 px-4 py-4 sm:px-6">
-                  <div className="flex min-w-0 items-center gap-3">
-                    <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-button bg-accent/10 text-accent">
-                      <FileTypeIcon className="h-5 w-5" aria-hidden="true" />
-                    </span>
-                    <div className="min-w-0">
-                      <p className="truncate text-sm font-semibold text-foreground">{file.name}</p>
-                      <p className="text-xs text-foreground-muted">
-                        {file.type || "Unknown type"} · {formatFileSize(file.size)}
-                      </p>
-                    </div>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={handleRemoveFile}
-                    aria-label={`Remove ${file.name}`}
-                    className="flex h-8 w-8 shrink-0 items-center justify-center rounded-button text-foreground-muted transition-colors duration-200 hover:bg-surface hover:text-foreground"
-                  >
-                    <X className="h-4 w-4" aria-hidden="true" />
-                  </button>
-                </div>
-              )}
+              <label
+                htmlFor="file-upload"
+                className="flex cursor-pointer flex-col items-center gap-3 px-6 py-10 text-center transition-colors duration-200 hover:border-accent"
+              >
+                <span className="flex h-12 w-12 items-center justify-center rounded-full bg-accent/10 text-accent">
+                  <UploadCloud className="h-6 w-6" aria-hidden="true" />
+                </span>
+                <span className="text-sm font-semibold text-foreground">
+                  Upload financial records
+                </span>
+                <span className="max-w-xs text-sm text-foreground-secondary">
+                  Drag and drop receipt images or CSV files here, or browse your files.
+                </span>
+                <span className="text-xs text-foreground-muted">JPG, PNG, CSV</span>
+              </label>
             </div>
+
+            {files.length > 0 && (
+              <ul className="flex flex-col gap-2">
+                {files.map((selected, index) => {
+                  const FileTypeIcon = isCsvFile(selected) ? FileSpreadsheet : FileImage;
+                  return (
+                    <li
+                      key={`${selected.name}-${selected.size}-${index}`}
+                      className="flex items-center justify-between gap-4 rounded-button border border-border bg-surface-alt px-4 py-3"
+                    >
+                      <div className="flex min-w-0 items-center gap-3">
+                        <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-button bg-accent/10 text-accent">
+                          <FileTypeIcon className="h-5 w-5" aria-hidden="true" />
+                        </span>
+                        <div className="min-w-0">
+                          <p className="truncate text-sm font-semibold text-foreground">
+                            {selected.name}
+                          </p>
+                          <p className="text-xs text-foreground-muted">
+                            {selected.type || "Unknown type"} · {formatFileSize(selected.size)}
+                          </p>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveFile(index)}
+                        aria-label={`Remove ${selected.name}`}
+                        className="flex h-8 w-8 shrink-0 items-center justify-center rounded-button text-foreground-muted transition-colors duration-200 hover:bg-surface hover:text-foreground"
+                      >
+                        <X className="h-4 w-4" aria-hidden="true" />
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
           </div>
 
           {error && (
