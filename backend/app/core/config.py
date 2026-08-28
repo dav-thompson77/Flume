@@ -24,9 +24,6 @@ class Settings(BaseSettings):
     environment: str = "development"
     debug: bool = False
 
-    # API
-    api_v1_prefix: str = "/api/v1"
-
     # CORS - comma separated list of allowed origins
     cors_origins: str = "http://localhost:3000"
 

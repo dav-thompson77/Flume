@@ -13,7 +13,7 @@ export function ApiStatus() {
   useEffect(() => {
     let cancelled = false;
 
-    apiFetch<HealthResponse>("/api/v1/health")
+    apiFetch<HealthResponse>("/health")
       .then((data) => {
         if (!cancelled) setStatus(data.status === "ok" ? "online" : "offline");
       })
