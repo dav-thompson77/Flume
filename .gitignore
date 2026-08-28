@@ -1,0 +1,19 @@
+# This root .gitignore covers top-level/editor/OS files.
+# frontend/ and backend/ each maintain their own, more specific .gitignore.
+
+# OS
+.DS_Store
+Thumbs.db
+
+# editors / IDEs
+.vscode/
+.idea/
+*.swp
+
+# env files (never commit real secrets)
+.env
+.env.*
+!**/.env.example
+
+# logs
+*.log
