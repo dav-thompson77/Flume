@@ -17,7 +17,7 @@ backend/
 │   ├── api/
 │   │   ├── router.py         # Aggregates all route modules
 │   │   └── routes/
-│   │       └── health.py     # /api/v1/health
+│   │       └── health.py     # GET /health
 │   ├── core/
 │   │   └── config.py         # Settings loaded from environment variables
 │   ├── models/                # ORM / domain models (empty for now)
