@@ -109,6 +109,7 @@ def run_intake_agent(application_id: str, document_id: str) -> list[dict]:
 
     rows = [
         {
+            "application_id": application_id,
             "document_id": document_id,
             "vendor": tx["vendor"],
             "transaction_date": tx["date"],

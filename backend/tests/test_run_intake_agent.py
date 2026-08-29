@@ -40,23 +40,26 @@ def test_extracts_and_inserts_new_transactions_from_csv(
     mock_get_client, mock_call_minimax
 ) -> None:
     fake_client = MagicMock()
+    transactions_table = MagicMock()
+    transactions_table.select.return_value.eq.return_value.execute.return_value.data = []
+    transactions_table.insert.return_value.execute.return_value.data = [
+        {
+            "id": "tx-1",
+            "application_id": "app-1",
+            "document_id": "doc-1",
+            "vendor": "Island Grocers",
+            "transaction_date": "2026-08-20",
+            "amount": 125.5,
+            "category": "sales",
+            "confidence": 0.94,
+        }
+    ]
 
     def table_side_effect(name):
         table_mock = MagicMock()
         if name == "transactions":
-            table_mock.select.return_value.eq.return_value.execute.return_value.data = []
-            table_mock.insert.return_value.execute.return_value.data = [
-                {
-                    "id": "tx-1",
-                    "document_id": "doc-1",
-                    "vendor": "Island Grocers",
-                    "transaction_date": "2026-08-20",
-                    "amount": 125.5,
-                    "category": "sales",
-                    "confidence": 0.94,
-                }
-            ]
-        elif name == "documents":
+            return transactions_table
+        if name == "documents":
             select_chain = table_mock.select.return_value.eq.return_value.eq.return_value
             select_chain.execute.return_value.data = [
                 {
@@ -88,3 +91,8 @@ def test_extracts_and_inserts_new_transactions_from_csv(
     sent_content = mock_call_minimax.call_args[0][0]
     assert isinstance(sent_content, str)
     assert "Island Grocers" in sent_content
+
+    transactions_table.insert.assert_called_once()
+    inserted_rows = transactions_table.insert.call_args[0][0]
+    assert inserted_rows[0]["application_id"] == "app-1"
+    assert inserted_rows[0]["document_id"] == "doc-1"
