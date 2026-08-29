@@ -36,9 +36,11 @@ export function formatTimestamp(value: string | undefined): string {
 
 export function statusBadgeClass(status: string): string {
   const key = status.toUpperCase();
-  if (key === "HOLD") return "border-red-400/30 bg-red-400/10 text-red-400";
-  if (key === "MANUAL_REVIEW") return "border-amber-400/30 bg-amber-400/10 text-amber-400";
-  if (key === "CLEAR_FOR_REVIEW") {
+  if (key === "HOLD" || key === "REJECTED") return "border-red-400/30 bg-red-400/10 text-red-400";
+  if (key === "MANUAL_REVIEW" || key === "REQUEST_MORE_REVIEW") {
+    return "border-amber-400/30 bg-amber-400/10 text-amber-400";
+  }
+  if (key === "CLEAR_FOR_REVIEW" || key === "APPROVED") {
     return "border-accent-secondary/30 bg-accent-secondary/10 text-accent-secondary";
   }
   return "border-border bg-surface text-foreground-muted";

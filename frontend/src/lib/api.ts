@@ -39,6 +39,18 @@ export type UnderwritingReport = {
   average_order_value: number;
   risk_level: string;
   summary: string;
+  recommendation?: string;
+  human_decision?: string | null;
+};
+
+export type HumanDecision = "APPROVE" | "REQUEST_MORE_REVIEW" | "REJECT";
+
+export type HumanDecisionResult = {
+  application_id: string;
+  human_decision: HumanDecision;
+  previous_status: string | null;
+  new_status: string;
+  status: string;
 };
 
 export type UnderwritingAction = {
@@ -233,6 +245,11 @@ function parseReport(data: unknown): UnderwritingReport | null {
     average_order_value: averageOrderValue,
     risk_level: asString(row.risk_level, "UNKNOWN"),
     summary: asString(row.summary),
+    recommendation: asString(row.recommendation) || asString(row.ai_recommendation) || undefined,
+    human_decision:
+      typeof row.human_decision === "string" && row.human_decision.trim()
+        ? row.human_decision
+        : null,
   };
 }
 
@@ -241,7 +258,7 @@ function parseAction(data: unknown): UnderwritingAction | null {
   const row = data as Record<string, unknown>;
   return {
     id: typeof row.id === "string" ? row.id : undefined,
-    agent_name: asString(row.agent_name) || undefined,
+    agent_name: asString(row.agent_name) || asString(row.actor_name) || undefined,
     action: asString(row.action) || undefined,
     reason: asString(row.reason) || undefined,
     previous_status: typeof row.previous_status === "string" ? row.previous_status : null,
@@ -331,5 +348,45 @@ export async function getApplicationReport(applicationId: string): Promise<Appli
     `/applications/${encodeURIComponent(applicationId)}/report`,
     { method: "GET" },
     parseApplicationReport,
+  );
+}
+
+function parseHumanDecisionResult(data: unknown): HumanDecisionResult {
+  if (!data || typeof data !== "object") {
+    throw new ApiError("The backend returned an unexpected decision payload.", 200);
+  }
+  const row = data as Record<string, unknown>;
+  const humanDecision = asString(row.human_decision);
+  if (
+    humanDecision !== "APPROVE" &&
+    humanDecision !== "REQUEST_MORE_REVIEW" &&
+    humanDecision !== "REJECT"
+  ) {
+    throw new ApiError("The backend returned an unexpected decision payload.", 200);
+  }
+  if (typeof row.application_id !== "string" || !row.application_id) {
+    throw new ApiError("The backend returned an unexpected decision payload.", 200);
+  }
+  return {
+    application_id: row.application_id,
+    human_decision: humanDecision,
+    previous_status: typeof row.previous_status === "string" ? row.previous_status : null,
+    new_status: asString(row.new_status),
+    status: asString(row.status),
+  };
+}
+
+export async function submitHumanDecision(
+  applicationId: string,
+  decision: HumanDecision,
+): Promise<HumanDecisionResult> {
+  return requestJson(
+    `/applications/${encodeURIComponent(applicationId)}/decision`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ decision }),
+    },
+    parseHumanDecisionResult,
   );
 }

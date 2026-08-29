@@ -233,6 +233,11 @@ export default function ReportPage() {
           <p className="mt-4 text-sm leading-relaxed text-foreground-secondary sm:text-base">
             {reason}
           </p>
+          <p className="mt-3 text-sm font-semibold text-foreground">
+            {report.human_decision
+              ? `Human decision: ${formatLabel(report.human_decision)}`
+              : "Pending human review"}
+          </p>
         </section>
 
         <section aria-labelledby="financial-overview-heading">
@@ -390,6 +395,16 @@ export default function ReportPage() {
                   <BadgeCheck className="h-3.5 w-3.5" aria-hidden="true" />
                   {formatLabel(application.status)}
                 </span>
+              </dd>
+            </div>
+            <div>
+              <dt className="text-xs font-semibold uppercase tracking-widest text-foreground-muted">
+                Human Decision
+              </dt>
+              <dd className="mt-1.5 text-sm font-semibold text-foreground">
+                {report.human_decision
+                  ? formatLabel(report.human_decision)
+                  : "Pending human review"}
               </dd>
             </div>
             <div>
