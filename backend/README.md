@@ -2,28 +2,43 @@
 
 FastAPI service that powers the Flume API. Deployed to [Railway](https://railway.app).
 
-This is currently a **foundation only** (Stage 2 in `FLUME.md`): a health check, CORS for the
-frontend, and a global error handler. The application/upload/transaction/underwriting/report
-endpoints, the Supabase queries, and the MiniMax-backed agents are built in later stages.
+This covers Backend Stage 2 in `FLUME.md`: application creation, document upload, and AI intake
+(MiniMax extracts transactions from an uploaded receipt/CSV, which get validated and stored in
+Supabase). Underwriting, human-review status changes, and the report endpoint are built in a
+later stage.
 
 ## Stack
 
 - [FastAPI](https://fastapi.tiangolo.com/)
 - [Uvicorn](https://www.uvicorn.org/) (ASGI server)
-- [Supabase](https://supabase.com/) Python client (not queried yet - see below)
+- [Supabase](https://supabase.com/) Python client (database + private file storage)
+- [MiniMax](https://platform.minimax.io/docs/api-reference/text-chat-openai) `MiniMax-M3`, called
+  directly over HTTP with `requests` (no SDK, no agent framework)
+
+## API
+
+| Method | Path                                    | Purpose                                             |
+| ------ | ---------------------------------------- | ---------------------------------------------------- |
+| GET    | `/health`                                  | Liveness check                                       |
+| POST   | `/applications`                             | Create an application (`{"merchant_name": "..."}`)   |
+| POST   | `/applications/{application_id}/documents`   | Upload one file (JPEG/PNG/WEBP/CSV, ≤10 MB)          |
+| POST   | `/applications/{application_id}/process`      | Run AI intake on every uploaded document             |
+
+See `main.py` for full request/response shapes (also available live at `/docs`).
 
 ## Project layout
 
 ```
 backend/
-├── main.py                 # FastAPI app, CORS, health check, global error handler
-├── supabase_client.py        # get_supabase_client() - shared client, no queries yet
+├── main.py                 # FastAPI app, CORS, error handler, all routes
+├── schemas.py                # Pydantic request/response models
+├── supabase_client.py          # get_supabase_client() - shared client
+├── minimax_client.py             # call_minimax_chat() - raw HTTP call to MiniMax
 ├── agents/
 │   ├── __init__.py
-│   ├── intake.py              # Placeholder: will turn uploads into transactions
-│   └── underwriting.py         # Placeholder: will turn transactions into a recommendation
+│   ├── intake.py                  # run_intake_agent() - document -> transactions
+│   └── underwriting.py             # Placeholder: transactions -> recommendation (later stage)
 ├── tests/
-│   └── test_health.py
 ├── requirements.txt            # Production dependencies
 ├── requirements-dev.txt         # Dev/test dependencies (superset of requirements.txt)
 ├── .env.example
@@ -38,9 +53,9 @@ Copy `.env.example` to `.env` and fill in the values:
 | Variable                     | Required for            | Notes                                              |
 | ----------------------------- | ------------------------ | --------------------------------------------------- |
 | `FRONTEND_URL`                 | CORS                      | Public URL of the deployed frontend                  |
-| `SUPABASE_URL`                  | Supabase client (unused yet) | From your Supabase project settings               |
-| `SUPABASE_SERVICE_ROLE_KEY`      | Supabase client (unused yet) | Server-side only - never expose to the browser    |
-| `MINIMAX_API_KEY`                 | Agents (unused yet)        | Not called anywhere yet                            |
+| `SUPABASE_URL`                  | All endpoints below `/health` | From your Supabase project settings             |
+| `SUPABASE_SERVICE_ROLE_KEY`      | All endpoints below `/health` | Server-side only - never expose to the browser  |
+| `MINIMAX_API_KEY`                 | `/applications/{id}/process`  | From your MiniMax API key settings              |
 | `PORT`                              | Local dev only            | Railway injects this automatically in production   |
 
 Never commit a real `.env` file or real secret values.
@@ -75,6 +90,25 @@ Expected response:
 ```json
 { "status": "ok" }
 ```
+
+## Trying the other endpoints
+
+```bash
+# Create an application
+curl -X POST http://localhost:8000/applications \
+  -H "Content-Type: application/json" \
+  -d '{"merchant_name": "Island Grocers"}'
+
+# Upload a document (repeat once per file)
+curl -X POST http://localhost:8000/applications/<application_id>/documents \
+  -F "file=@/path/to/receipt.jpg;type=image/jpeg"
+
+# Run AI intake on every uploaded document
+curl -X POST http://localhost:8000/applications/<application_id>/process
+```
+
+The upload and process endpoints need real `SUPABASE_URL`/`SUPABASE_SERVICE_ROLE_KEY` (and
+`MINIMAX_API_KEY` for processing) set in `.env` - they'll fail with a clear error otherwise.
 
 ## Testing & linting
 
