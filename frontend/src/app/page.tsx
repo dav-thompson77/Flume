@@ -3,7 +3,8 @@
 import { useRef, useState } from "react";
 import type { ChangeEvent, DragEvent, FormEvent } from "react";
 import { useRouter } from "next/navigation";
-import { AlertCircle, FileImage, FileSpreadsheet, UploadCloud, X } from "lucide-react";
+import { AlertCircle, FileImage, FileSpreadsheet, Loader2, UploadCloud, X } from "lucide-react";
+import { ApiError, createApplication, uploadDocument } from "@/lib/api";
 
 const ACCEPTED_MIME_TYPES = ["image/jpeg", "image/png", "text/csv"];
 const ACCEPTED_EXTENSIONS = [".jpg", ".jpeg", ".png", ".csv"];
@@ -27,12 +28,7 @@ function formatFileSize(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-function generateApplicationId(): string {
-  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
-    return crypto.randomUUID();
-  }
-  return `app_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
-}
+type SubmitPhase = "creating" | "uploading" | null;
 
 export default function Home() {
   const router = useRouter();
@@ -42,8 +38,9 @@ export default function Home() {
   const [files, setFiles] = useState<File[]>([]);
   const [isDragging, setIsDragging] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [submitPhase, setSubmitPhase] = useState<SubmitPhase>(null);
 
-  const canAnalyze = merchantName.trim().length > 0 && files.length > 0;
+  const canAnalyze = merchantName.trim().length > 0 && files.length > 0 && submitPhase === null;
 
   function acceptFiles(candidates: FileList | File[] | undefined | null) {
     if (!candidates || candidates.length === 0) return;
@@ -91,10 +88,13 @@ export default function Home() {
     setFiles((prev) => prev.filter((_, i) => i !== index));
   }
 
-  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
-    if (!merchantName.trim()) {
+    if (submitPhase) return;
+
+    const name = merchantName.trim();
+    if (!name) {
       setError("Enter the merchant's business name.");
       return;
     }
@@ -103,25 +103,31 @@ export default function Home() {
       return;
     }
 
-    const applicationId = generateApplicationId();
+    setError(null);
 
-    // No backend yet: stash what the processing page needs to display
-    // (merchant name + file metadata, never the file contents) so this
-    // stage stays entirely client-side.
-    sessionStorage.setItem(
-      `flume:application:${applicationId}`,
-      JSON.stringify({
-        merchantName: merchantName.trim(),
-        files: files.map((selected) => ({
-          name: selected.name,
-          type: selected.type,
-          size: selected.size,
-        })),
-        createdAt: new Date().toISOString(),
-      }),
-    );
+    try {
+      setSubmitPhase("creating");
+      const application = await createApplication(name);
 
-    router.push(`/processing/${applicationId}`);
+      setSubmitPhase("uploading");
+      for (const selected of files) {
+        await uploadDocument(application.id, selected);
+      }
+
+      sessionStorage.setItem(
+        `flume:application:${application.id}`,
+        JSON.stringify({ merchantName: name }),
+      );
+
+      router.push(`/processing/${application.id}`);
+    } catch (err) {
+      const message =
+        err instanceof ApiError
+          ? err.message
+          : "Could not start the analysis. Please try again.";
+      setError(message);
+      setSubmitPhase(null);
+    }
   }
 
   return (
@@ -161,6 +167,7 @@ export default function Home() {
               onChange={(event) => setMerchantName(event.target.value)}
               placeholder="e.g. Kingston Market Ltd."
               autoComplete="off"
+              disabled={submitPhase !== null}
               className="rounded-button border border-border bg-surface-alt px-4 py-3 text-sm text-foreground outline-none transition-colors duration-200 placeholder:text-foreground-muted focus:border-accent"
             />
             <p className="text-xs text-foreground-muted">Enter the business being assessed.</p>
@@ -185,6 +192,7 @@ export default function Home() {
                 accept={ACCEPT_ATTRIBUTE}
                 multiple
                 onChange={handleInputChange}
+                disabled={submitPhase !== null}
                 className="sr-only"
               />
 
@@ -230,8 +238,9 @@ export default function Home() {
                       <button
                         type="button"
                         onClick={() => handleRemoveFile(index)}
+                        disabled={submitPhase !== null}
                         aria-label={`Remove ${selected.name}`}
-                        className="flex h-8 w-8 shrink-0 items-center justify-center rounded-button text-foreground-muted transition-colors duration-200 hover:bg-surface hover:text-foreground"
+                        className="flex h-8 w-8 shrink-0 items-center justify-center rounded-button text-foreground-muted transition-colors duration-200 hover:bg-surface hover:text-foreground disabled:cursor-not-allowed"
                       >
                         <X className="h-4 w-4" aria-hidden="true" />
                       </button>
@@ -252,9 +261,21 @@ export default function Home() {
           <button
             type="submit"
             disabled={!canAnalyze}
-            className="rounded-button bg-accent px-6 py-3 text-sm font-semibold text-white transition-colors duration-200 hover:bg-accent/90 disabled:cursor-not-allowed disabled:bg-surface-alt disabled:text-foreground-muted"
+            className="inline-flex items-center justify-center gap-2 rounded-button bg-accent px-6 py-3 text-sm font-semibold text-white transition-colors duration-200 hover:bg-accent/90 disabled:cursor-not-allowed disabled:bg-surface-alt disabled:text-foreground-muted"
           >
-            Analyze Records
+            {submitPhase === "creating" && (
+              <>
+                <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+                Creating application...
+              </>
+            )}
+            {submitPhase === "uploading" && (
+              <>
+                <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+                Uploading documents...
+              </>
+            )}
+            {submitPhase === null && "Analyze Records"}
           </button>
         </form>
       </div>
