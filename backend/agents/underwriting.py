@@ -14,7 +14,6 @@ from supabase_client import get_supabase_client
 
 logger = logging.getLogger(__name__)
 
-AGENT_NAME = "Underwriting Agent"
 EXPENSE_RATIO_HOLD_THRESHOLD = 0.85
 LOW_CONFIDENCE_THRESHOLD = 0.70
 
@@ -373,7 +372,6 @@ def _insert_audit_record(
 ) -> None:
     row = {
         "application_id": application_id,
-        "agent_name": AGENT_NAME,
         "action": "status_change",
         "reason": reason,
         "previous_status": previous_status,

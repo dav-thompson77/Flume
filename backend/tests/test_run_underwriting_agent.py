@@ -8,7 +8,7 @@ from unittest.mock import patch
 
 import pytest
 
-from agents.underwriting import UnderwritingError, run_underwriting_agent
+from agents.underwriting import UnderwritingError, _insert_audit_record, run_underwriting_agent
 
 
 class FakeResult:
@@ -135,7 +135,8 @@ def test_agent_writes_status_audit_and_report(mock_get_client) -> None:
     assert store["applications"][0]["status"] == "CLEAR_FOR_REVIEW"
     assert len(store["underwriting_actions"]) == 1
     action = store["underwriting_actions"][0]
-    assert action["agent_name"] == "Underwriting Agent"
+    assert "agent_name" not in action
+    assert action["application_id"] == "app-1"
     assert action["action"] == "status_change"
     assert action["previous_status"] == "PENDING"
     assert action["new_status"] == "CLEAR_FOR_REVIEW"
@@ -170,7 +171,6 @@ def test_agent_is_idempotent_when_a_report_already_exists(mock_get_client) -> No
         {
             "id": "action-1",
             "application_id": "app-1",
-            "agent_name": "Underwriting Agent",
             "action": "status_change",
             "reason": "Already processed.",
             "previous_status": "PENDING",
@@ -220,3 +220,23 @@ def test_agent_rejects_application_with_no_transactions(mock_get_client) -> None
 
     with pytest.raises(UnderwritingError, match="no transactions"):
         run_underwriting_agent("app-1")
+
+
+def test_audit_insert_does_not_send_agent_name() -> None:
+    store = {"underwriting_actions": []}
+    _insert_audit_record(
+        FakeClient(store),
+        application_id="app-1",
+        reason="Expenses exceed the 85% threshold.",
+        previous_status="PENDING",
+        new_status="HOLD",
+    )
+
+    assert len(store["underwriting_actions"]) == 1
+    row = store["underwriting_actions"][0]
+    assert "agent_name" not in row
+    assert row["application_id"] == "app-1"
+    assert row["action"] == "status_change"
+    assert row["previous_status"] == "PENDING"
+    assert row["new_status"] == "HOLD"
+    assert row["reason"] == "Expenses exceed the 85% threshold."
