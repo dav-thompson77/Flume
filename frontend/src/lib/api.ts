@@ -76,6 +76,26 @@ function networkFailure(): ApiError {
   );
 }
 
+const FETCH_TIMEOUT_MS = 20_000;
+const PROCESS_TIMEOUT_MS = 180_000;
+
+async function fetchWithTimeout(
+  url: string,
+  init: RequestInit,
+  timeoutMs = FETCH_TIMEOUT_MS,
+): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...init, signal: controller.signal });
+  } catch (error) {
+    if (error instanceof ApiError) throw error;
+    throw networkFailure();
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 async function readErrorMessage(response: Response): Promise<string> {
   try {
     const body: unknown = await response.json();
@@ -109,10 +129,11 @@ async function requestJson<T>(
   path: string,
   init: RequestInit,
   parse: (data: unknown) => T,
+  timeoutMs = FETCH_TIMEOUT_MS,
 ): Promise<T> {
   let response: Response;
   try {
-    response = await fetch(`${getApiBaseUrl()}${path}`, init);
+    response = await fetchWithTimeout(`${getApiBaseUrl()}${path}`, init, timeoutMs);
   } catch (error) {
     if (error instanceof ApiError) throw error;
     throw networkFailure();
@@ -279,7 +300,7 @@ export async function uploadDocument(applicationId: string, file: File): Promise
 
   let response: Response;
   try {
-    response = await fetch(
+    response = await fetchWithTimeout(
       `${getApiBaseUrl()}/applications/${encodeURIComponent(applicationId)}/documents`,
       { method: "POST", body: form },
     );
@@ -301,6 +322,7 @@ export async function processApplication(applicationId: string): Promise<void> {
     `/applications/${encodeURIComponent(applicationId)}/process`,
     { method: "POST" },
     () => undefined,
+    PROCESS_TIMEOUT_MS,
   );
 }
 

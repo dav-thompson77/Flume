@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useParams, usePathname, useRouter } from "next/navigation";
 import { AlertCircle, Check, Circle, Loader2 } from "lucide-react";
 import { ApiError, processApplication } from "@/lib/api";
 
@@ -26,7 +26,11 @@ function stepState(index: number, completedCount: number): StepState {
 export default function ProcessingPage() {
   const router = useRouter();
   const params = useParams<{ id: string }>();
-  const applicationId = params.id;
+  const pathname = usePathname();
+  const applicationId =
+    (typeof params.id === "string" && params.id) ||
+    pathname.split("/").filter(Boolean).pop() ||
+    "";
 
   // Step 0 ("Upload Complete") starts already done, which puts step 1
   // ("Extracting Transactions") into the active state immediately.
@@ -48,7 +52,12 @@ export default function ProcessingPage() {
   });
 
   useEffect(() => {
-    if (!applicationId) return;
+    if (!applicationId) {
+      const timer = setTimeout(() => {
+        setError("Missing application id.");
+      }, 0);
+      return () => clearTimeout(timer);
+    }
 
     let cancelled = false;
     const timers: ReturnType<typeof setTimeout>[] = [];
@@ -88,7 +97,10 @@ export default function ProcessingPage() {
       cancelled = true;
       timers.forEach(clearTimeout);
     };
-  }, [applicationId, attempt, router]);
+    // router.replace is used only after a successful process call.
+    // Omitting `router` keeps this effect from restarting on every render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- see above
+  }, [applicationId, attempt]);
 
   const activeIndex = Math.min(completedCount, STEPS.length - 1);
   const currentStepNumber = activeIndex + 1;

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useParams, usePathname, useRouter } from "next/navigation";
 import {
   AlertCircle,
   ArrowLeft,
@@ -81,7 +81,11 @@ function latestAction(actions: UnderwritingAction[]): UnderwritingAction | null 
 export default function ReportPage() {
   const router = useRouter();
   const params = useParams<{ id: string }>();
-  const applicationId = params.id;
+  const pathname = usePathname();
+  const applicationId =
+    (typeof params.id === "string" && params.id) ||
+    pathname.split("/").filter(Boolean).pop() ||
+    "";
 
   const [data, setData] = useState<ApplicationReport | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -89,7 +93,13 @@ export default function ReportPage() {
   const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
-    if (!applicationId) return;
+    if (!applicationId) {
+      const timer = setTimeout(() => {
+        setError("Missing application id.");
+        setLoading(false);
+      }, 0);
+      return () => clearTimeout(timer);
+    }
 
     let cancelled = false;
 
