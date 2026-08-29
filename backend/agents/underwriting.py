@@ -16,9 +16,11 @@ logger = logging.getLogger(__name__)
 
 EXPENSE_RATIO_HOLD_THRESHOLD = 0.85
 LOW_CONFIDENCE_THRESHOLD = 0.70
-# underwriting_actions.actor_type: AI/agent vs human vs system (FLUME.md section 12).
-# Same lowercase style as action="status_change" on this table.
+# Live underwriting_actions columns (from Railway/PostgREST row dumps):
+# application_id, actor_type, actor_name, action, reason, from_status, to_status.
+# actor_id is omitted so it stays NULL. Do not send agent_name (column does not exist).
 ACTOR_TYPE_AI = "ai"
+ACTOR_NAME_UNDERWRITING_AGENT = "Underwriting Agent"
 
 
 class UnderwritingError(Exception):
@@ -351,8 +353,8 @@ def _result_from_existing(client, application_id: str, report: dict) -> dict:
         "expense_ratio": float(report.get("expense_ratio") or 0),
         "average_order_value": float(report.get("average_order_value") or 0),
         "risk_level": report.get("risk_level"),
-        "previous_status": action.get("previous_status"),
-        "new_status": action.get("new_status"),
+        "previous_status": action.get("from_status") or action.get("previous_status"),
+        "new_status": action.get("to_status") or action.get("new_status"),
         "reason": action.get("reason") or "",
         "summary": report.get("summary") or "",
     }
@@ -376,10 +378,11 @@ def _insert_audit_record(
     row = {
         "application_id": application_id,
         "actor_type": ACTOR_TYPE_AI,
+        "actor_name": ACTOR_NAME_UNDERWRITING_AGENT,
         "action": "status_change",
         "reason": reason,
-        "previous_status": previous_status,
-        "new_status": new_status,
+        "from_status": previous_status,
+        "to_status": new_status,
     }
     result = _execute(
         client.table("underwriting_actions").insert(row),
