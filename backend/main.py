@@ -1,8 +1,8 @@
 """FastAPI application entrypoint for the Flume backend.
 
-Backend Stage 2: application creation, document upload, and AI intake
-(FLUME.md sections 13-14, 22-23). Underwriting, human review status
-changes, and the report endpoint are built in a later stage.
+Backend MVP: application creation, document upload, AI intake, and
+underwriting (FLUME.md sections 13-23). Human-review decision buttons
+are a later frontend-integration step.
 """
 
 import logging
@@ -16,8 +16,15 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from agents.intake import IntakeError, run_intake_agent
+from agents.underwriting import UnderwritingError, run_underwriting_agent
 from minimax_client import MiniMaxError
-from schemas import ApplicationCreate, ApplicationOut, DocumentOut, ProcessResult
+from schemas import (
+    ApplicationCreate,
+    ApplicationOut,
+    ApplicationReportOut,
+    DocumentOut,
+    ProcessResult,
+)
 from supabase_client import get_supabase_client
 
 load_dotenv()
@@ -80,7 +87,7 @@ def _safe_filename(original_filename: str | None) -> str:
 def _get_application_or_404(client, application_id: str) -> dict:
     """Look up an application by id, or raise a 404."""
     try:
-        result = client.table("applications").select("id").eq("id", application_id).execute()
+        result = client.table("applications").select("*").eq("id", application_id).execute()
     except Exception:
         result = None
 
@@ -88,6 +95,19 @@ def _get_application_or_404(client, application_id: str) -> dict:
         raise HTTPException(status_code=404, detail="Application not found")
 
     return result.data[0]
+
+
+def _http_for_underwriting_error(exc: UnderwritingError) -> HTTPException:
+    """Map underwriting errors to a client-safe HTTP status."""
+    message = str(exc)
+    lowered = message.lower()
+    if "not found" in lowered:
+        status_code = 404
+    elif "database error" in lowered:
+        status_code = 500
+    else:
+        status_code = 400
+    return HTTPException(status_code=status_code, detail=message)
 
 
 @app.post("/applications", response_model=ApplicationOut, status_code=201)
@@ -176,11 +196,15 @@ def upload_document(application_id: str, file: UploadFile = File(...)) -> dict:
 
 @app.post("/applications/{application_id}/process", response_model=ProcessResult)
 def process_application(application_id: str) -> dict:
-    """Run AI intake for every document on an application (Part 8).
+    """Run AI intake, then underwriting, for an application.
 
-    This stage performs intake only - extracting and storing
-    transactions. It does not run underwriting or change the
-    application's status; that's Backend Stage 3.
+    1. Extract and store transactions for every uploaded document.
+    2. Run `run_underwriting_agent` once for the application.
+
+    Intake already skips MiniMax when a document already has
+    transactions. Underwriting returns the existing report instead of
+    writing a duplicate status change when the application was already
+    processed.
     """
     client = get_supabase_client()
     _get_application_or_404(client, application_id)
@@ -211,9 +235,70 @@ def process_application(application_id: str) -> dict:
 
         all_transactions.extend(transactions)
 
+    try:
+        underwriting = run_underwriting_agent(application_id)
+    except UnderwritingError as exc:
+        logger.exception("Underwriting failed for application %s", application_id)
+        raise _http_for_underwriting_error(exc) from exc
+
     return {
         "application_id": application_id,
         "documents_processed": len(documents),
         "transactions_extracted": len(all_transactions),
         "transactions": all_transactions,
+        "underwriting": underwriting,
+    }
+
+
+@app.get("/applications/{application_id}/report", response_model=ApplicationReportOut)
+def get_application_report(application_id: str) -> dict:
+    """Return the application, transactions, latest report, and audit trail.
+
+    If underwriting has not run yet, `report` is null rather than a
+    fabricated object. Audit rows are returned in chronological order.
+    """
+    client = get_supabase_client()
+    application = _get_application_or_404(client, application_id)
+
+    try:
+        docs_result = (
+            client.table("documents").select("id").eq("application_id", application_id).execute()
+        )
+        doc_ids = [doc["id"] for doc in (docs_result.data or []) if doc.get("id")]
+
+        if doc_ids:
+            txs_result = (
+                client.table("transactions").select("*").in_("document_id", doc_ids).execute()
+            )
+            transactions = txs_result.data or []
+        else:
+            transactions = []
+
+        reports_result = (
+            client.table("reports")
+            .select("*")
+            .eq("application_id", application_id)
+            .order("created_at", desc=True)
+            .limit(1)
+            .execute()
+        )
+        report = reports_result.data[0] if reports_result.data else None
+
+        actions_result = (
+            client.table("underwriting_actions")
+            .select("*")
+            .eq("application_id", application_id)
+            .order("created_at")
+            .execute()
+        )
+        underwriting_actions = actions_result.data or []
+    except Exception as exc:
+        logger.exception("Failed to load report for application %s", application_id)
+        raise HTTPException(status_code=500, detail="Failed to load application report") from exc
+
+    return {
+        "application": application,
+        "transactions": transactions,
+        "report": report,
+        "underwriting_actions": underwriting_actions,
     }

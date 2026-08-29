@@ -37,8 +37,29 @@ class TransactionOut(BaseModel):
     confidence: float
 
 
+class UnderwritingResult(BaseModel):
+    application_id: str
+    total_revenue: float
+    total_expenses: float
+    expense_ratio: float
+    average_order_value: float
+    risk_level: str
+    previous_status: str | None
+    new_status: str | None
+    reason: str
+    summary: str
+
+
 class ProcessResult(BaseModel):
     application_id: str
     documents_processed: int
     transactions_extracted: int
     transactions: list[TransactionOut]
+    underwriting: UnderwritingResult
+
+
+class ApplicationReportOut(BaseModel):
+    application: dict
+    transactions: list[dict]
+    report: dict | None
+    underwriting_actions: list[dict]

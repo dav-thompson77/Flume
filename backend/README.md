@@ -2,10 +2,10 @@
 
 FastAPI service that powers the Flume API. Deployed to [Railway](https://railway.app).
 
-This covers Backend Stage 2 in `FLUME.md`: application creation, document upload, and AI intake
+This covers the backend MVP in `FLUME.md`: application creation, document upload, AI intake
 (MiniMax extracts transactions from an uploaded receipt/CSV, which get validated and stored in
-Supabase). Underwriting, human-review status changes, and the report endpoint are built in a
-later stage.
+Supabase), and underwriting (Python calculates metrics, applies deterministic rules, updates
+status, and writes the audit trail and report).
 
 ## Stack
 
@@ -22,7 +22,8 @@ later stage.
 | GET    | `/health`                                  | Liveness check                                       |
 | POST   | `/applications`                             | Create an application (`{"merchant_name": "..."}`)   |
 | POST   | `/applications/{application_id}/documents`   | Upload one file (JPEG/PNG/WEBP/CSV, ≤10 MB)          |
-| POST   | `/applications/{application_id}/process`      | Run AI intake on every uploaded document             |
+| POST   | `/applications/{application_id}/process`      | Run AI intake, then underwriting                     |
+| GET    | `/applications/{application_id}/report`       | Application, transactions, latest report, audit trail |
 
 See `main.py` for full request/response shapes (also available live at `/docs`).
 
@@ -37,7 +38,7 @@ backend/
 ├── agents/
 │   ├── __init__.py
 │   ├── intake.py                  # run_intake_agent() - document -> transactions
-│   └── underwriting.py             # Placeholder: transactions -> recommendation (later stage)
+│   └── underwriting.py             # run_underwriting_agent() - metrics, rules, status, audit, report
 ├── tests/
 ├── requirements.txt            # Production dependencies
 ├── requirements-dev.txt         # Dev/test dependencies (superset of requirements.txt)
@@ -103,8 +104,11 @@ curl -X POST http://localhost:8000/applications \
 curl -X POST http://localhost:8000/applications/<application_id>/documents \
   -F "file=@/path/to/receipt.jpg;type=image/jpeg"
 
-# Run AI intake on every uploaded document
+# Run AI intake, then underwriting
 curl -X POST http://localhost:8000/applications/<application_id>/process
+
+# Fetch the underwriting report and audit trail
+curl http://localhost:8000/applications/<application_id>/report
 ```
 
 The upload and process endpoints need real `SUPABASE_URL`/`SUPABASE_SERVICE_ROLE_KEY` (and

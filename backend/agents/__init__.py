@@ -3,13 +3,9 @@
 This is not an agent framework - just two workflow functions described
 in FLUME.md (sections 13-15):
 
-- `intake.extract_transactions`: turns an uploaded financial record
-  into structured transactions using MiniMax.
-- `underwriting.generate_recommendation`: turns structured transactions
-  into an AI-assisted underwriting recommendation.
-
-Neither is implemented yet; both are placeholders for a later backend
-stage. Business logic (validation, financial calculations, deterministic
-rules, database writes) stays in the FastAPI endpoints that call these
-functions, not inside the agents themselves (FLUME.md section 3).
+- `intake.run_intake_agent`: turns an uploaded financial record into
+  structured transactions using MiniMax.
+- `underwriting.run_underwriting_agent`: calculates metrics, applies
+  deterministic rules, updates application status, and writes the audit
+  trail and report.
 """
