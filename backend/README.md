@@ -23,7 +23,7 @@ status, and writes the audit trail and report).
 | POST   | `/applications`                             | Create an application (`{"merchant_name": "..."}`)   |
 | POST   | `/applications/{application_id}/documents`   | Upload one file (JPEG/PNG/WEBP/CSV, ≤10 MB)          |
 | POST   | `/applications/{application_id}/process`      | Run AI intake, then underwriting                     |
-| GET    | `/applications/{application_id}/report`       | Application, transactions, latest report, audit trail |
+| POST   | `/applications/{application_id}/decision`     | Record the human reviewer's final decision           |
 
 See `main.py` for full request/response shapes (also available live at `/docs`).
 

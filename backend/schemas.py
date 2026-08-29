@@ -63,3 +63,15 @@ class ApplicationReportOut(BaseModel):
     transactions: list[dict]
     report: dict | None
     underwriting_actions: list[dict]
+
+
+class HumanDecisionCreate(BaseModel):
+    decision: str
+
+
+class HumanDecisionOut(BaseModel):
+    application_id: str
+    human_decision: str
+    previous_status: str | None
+    new_status: str
+    status: str

@@ -22,18 +22,54 @@ LOW_CONFIDENCE_THRESHOLD = 0.70
 # from_status, and to_status (those columns do not exist).
 ACTOR_TYPE_AI = "ai"
 ACTOR_NAME_UNDERWRITING_AGENT = "Underwriting Agent"
+ACTOR_TYPE_HUMAN = "human"
+ACTOR_NAME_BANK_REVIEWER = "Bank Reviewer"
+
+HUMAN_DECISION_APPROVE = "APPROVE"
+HUMAN_DECISION_REQUEST_MORE_REVIEW = "REQUEST_MORE_REVIEW"
+HUMAN_DECISION_REJECT = "REJECT"
+HUMAN_DECISIONS = frozenset(
+    {
+        HUMAN_DECISION_APPROVE,
+        HUMAN_DECISION_REQUEST_MORE_REVIEW,
+        HUMAN_DECISION_REJECT,
+    }
+)
+# Map the recorded human decision onto existing SCREAMING_SNAKE application
+# status conventions. APPROVED/REJECTED are final human outcomes; they are
+# distinct from the AI statuses CLEAR_FOR_REVIEW / HOLD / MANUAL_REVIEW.
+HUMAN_DECISION_TO_STATUS = {
+    HUMAN_DECISION_APPROVE: "APPROVED",
+    HUMAN_DECISION_REQUEST_MORE_REVIEW: "REQUEST_MORE_REVIEW",
+    HUMAN_DECISION_REJECT: "REJECTED",
+}
+HUMAN_DECISION_REASONS = {
+    HUMAN_DECISION_APPROVE: "The bank reviewer approved this application.",
+    HUMAN_DECISION_REQUEST_MORE_REVIEW: (
+        "The bank reviewer requested more review of this application."
+    ),
+    HUMAN_DECISION_REJECT: "The bank reviewer rejected this application.",
+}
 
 # Verified live reports columns:
 # id, application_id, total_revenue, total_expenses, expense_ratio,
 # average_order_value, risk_level, ai_recommendation, ai_summary,
 # human_decision, created_at.
-# Insert ai_recommendation and ai_summary. Omit id, created_at (defaults)
-# and human_decision (NULL until a human review endpoint exists).
+# Insert ai_recommendation and ai_summary. Omit id and created_at (defaults).
+# Leave human_decision unset on insert; the review endpoint writes it later.
 # Do not send explanation, summary, or a nested metrics object.
 
 
 class UnderwritingError(Exception):
     """Raised when underwriting cannot produce a valid result."""
+
+
+class HumanDecisionExistsError(UnderwritingError):
+    """Raised when a human decision is already stored for the application."""
+
+    def __init__(self, existing_decision: str):
+        super().__init__("A human decision is already recorded for this application.")
+        self.existing_decision = existing_decision
 
 
 def run_underwriting_agent(application_id: str) -> dict:
@@ -118,6 +154,58 @@ def run_underwriting_agent(application_id: str) -> dict:
         "new_status": new_status,
         "reason": decision["reason"],
         "summary": summary,
+    }
+
+
+def submit_human_decision(application_id: str, decision: str) -> dict:
+    """Record the reviewer's final decision for an underwritten application.
+
+    Writes reports.human_decision, updates applications.status, and inserts
+    a human underwriting_actions row. Does not copy the AI recommendation.
+    """
+    if decision not in HUMAN_DECISIONS:
+        raise UnderwritingError(
+            "decision must be one of: APPROVE, REQUEST_MORE_REVIEW, REJECT"
+        )
+
+    client = get_supabase_client()
+    application = _fetch_application(client, application_id)
+    report = _fetch_latest_report(client, application_id)
+    if report is None:
+        raise UnderwritingError("No underwriting report exists for this application.")
+
+    existing = report.get("human_decision")
+    if existing not in (None, ""):
+        raise HumanDecisionExistsError(str(existing))
+
+    report_id = report.get("id")
+    if not report_id:
+        raise UnderwritingError(
+            "A database error occurred while saving the human decision."
+        )
+
+    previous_status = application.get("status")
+    new_status = HUMAN_DECISION_TO_STATUS[decision]
+
+    _update_report_human_decision(client, report_id, decision)
+    _update_application_status(client, application_id, new_status)
+    _insert_audit_record(
+        client,
+        application_id=application_id,
+        reason=HUMAN_DECISION_REASONS[decision],
+        previous_status=previous_status,
+        new_status=new_status,
+        actor_type=ACTOR_TYPE_HUMAN,
+        actor_name=ACTOR_NAME_BANK_REVIEWER,
+        action="human_decision",
+    )
+
+    return {
+        "application_id": application_id,
+        "human_decision": decision,
+        "previous_status": previous_status,
+        "new_status": new_status,
+        "status": new_status,
     }
 
 
@@ -377,6 +465,13 @@ def _update_application_status(client, application_id: str, new_status: str) -> 
     )
 
 
+def _update_report_human_decision(client, report_id: str, decision: str) -> None:
+    _execute(
+        client.table("reports").update({"human_decision": decision}).eq("id", report_id),
+        "A database error occurred while saving the human decision.",
+    )
+
+
 def _insert_audit_record(
     client,
     *,
@@ -384,12 +479,15 @@ def _insert_audit_record(
     reason: str,
     previous_status: str | None,
     new_status: str,
+    actor_type: str = ACTOR_TYPE_AI,
+    actor_name: str = ACTOR_NAME_UNDERWRITING_AGENT,
+    action: str = "status_change",
 ) -> None:
     row = {
         "application_id": application_id,
-        "actor_type": ACTOR_TYPE_AI,
-        "actor_name": ACTOR_NAME_UNDERWRITING_AGENT,
-        "action": "status_change",
+        "actor_type": actor_type,
+        "actor_name": actor_name,
+        "action": action,
         "reason": reason,
         "previous_status": previous_status,
         "new_status": new_status,
@@ -416,6 +514,7 @@ def report_row_for_api(row: dict | None) -> dict | None:
     mapped = dict(row)
     mapped["summary"] = mapped.get("ai_summary") or ""
     mapped["recommendation"] = mapped.get("ai_recommendation") or ""
+    mapped["human_decision"] = mapped.get("human_decision")
     return mapped
 
 

@@ -1,8 +1,7 @@
 """FastAPI application entrypoint for the Flume backend.
 
-Backend MVP: application creation, document upload, AI intake, and
-underwriting (FLUME.md sections 13-23). Human-review decision buttons
-are a later frontend-integration step.
+Backend MVP: application creation, document upload, AI intake,
+underwriting, and human review decisions (FLUME.md sections 13-23).
 """
 
 import logging
@@ -16,13 +15,22 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from agents.intake import IntakeError, run_intake_agent
-from agents.underwriting import UnderwritingError, report_row_for_api, run_underwriting_agent
+from agents.underwriting import (
+    HUMAN_DECISIONS,
+    HumanDecisionExistsError,
+    UnderwritingError,
+    report_row_for_api,
+    run_underwriting_agent,
+    submit_human_decision,
+)
 from minimax_client import MiniMaxError
 from schemas import (
     ApplicationCreate,
     ApplicationOut,
     ApplicationReportOut,
     DocumentOut,
+    HumanDecisionCreate,
+    HumanDecisionOut,
     ProcessResult,
 )
 from supabase_client import get_supabase_client
@@ -301,3 +309,27 @@ def get_application_report(application_id: str) -> dict:
         "report": report,
         "underwriting_actions": underwriting_actions,
     }
+
+
+@app.post("/applications/{application_id}/decision", response_model=HumanDecisionOut)
+def record_application_decision(application_id: str, payload: HumanDecisionCreate) -> dict:
+    """Record the bank reviewer's final decision for an application.
+
+    Persists reports.human_decision, updates applications.status, and
+    writes a human underwriting_actions row. Does not overwrite an
+    existing human decision.
+    """
+    if payload.decision not in HUMAN_DECISIONS:
+        raise HTTPException(
+            status_code=400,
+            detail="decision must be one of: APPROVE, REQUEST_MORE_REVIEW, REJECT",
+        )
+
+    _get_application_or_404(get_supabase_client(), application_id)
+
+    try:
+        return submit_human_decision(application_id, payload.decision)
+    except HumanDecisionExistsError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except UnderwritingError as exc:
+        raise _http_for_underwriting_error(exc) from exc

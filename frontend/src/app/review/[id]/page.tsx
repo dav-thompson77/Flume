@@ -21,7 +21,9 @@ import {
 import {
   ApiError,
   getApplicationReport,
+  submitHumanDecision,
   type ApplicationReport,
+  type HumanDecision,
   type UnderwritingAction,
 } from "@/lib/api";
 import {
@@ -33,12 +35,10 @@ import {
   statusBadgeClass,
 } from "@/lib/format";
 
-type Decision = "approved" | "more_review" | "rejected";
-
-const DECISION_LABELS: Record<Decision, string> = {
-  approved: "Approved",
-  more_review: "Requested More Review",
-  rejected: "Rejected",
+const DECISION_LABELS: Record<HumanDecision, string> = {
+  APPROVE: "Approved",
+  REQUEST_MORE_REVIEW: "Requested More Review",
+  REJECT: "Rejected",
 };
 
 type FlagSeverity = "attention" | "neutral" | "positive";
@@ -75,12 +75,16 @@ const LOW_CONFIDENCE_THRESHOLD = 0.7;
 const DECISION_BUTTON_BASE =
   "inline-flex flex-1 items-center justify-center gap-2 rounded-button px-5 py-3 text-sm font-semibold transition-colors duration-200 disabled:cursor-not-allowed";
 
-function decisionButtonClass(kind: Decision, decision: Decision | null): string {
+function isHumanDecision(value: string | null | undefined): value is HumanDecision {
+  return value === "APPROVE" || value === "REQUEST_MORE_REVIEW" || value === "REJECT";
+}
+
+function decisionButtonClass(kind: HumanDecision, decision: HumanDecision | null): string {
   const isSelected = decision === kind;
 
   if (isSelected) {
-    if (kind === "approved") return "bg-accent text-white";
-    if (kind === "rejected") return "border border-red-400/40 bg-red-400/10 text-red-400";
+    if (kind === "APPROVE") return "bg-accent text-white";
+    if (kind === "REJECT") return "border border-red-400/40 bg-red-400/10 text-red-400";
     return "border border-accent/40 bg-accent/10 text-foreground";
   }
 
@@ -88,8 +92,8 @@ function decisionButtonClass(kind: Decision, decision: Decision | null): string 
     return "border border-border bg-surface-alt text-foreground-muted";
   }
 
-  if (kind === "approved") return "bg-accent text-white hover:bg-accent/90";
-  if (kind === "rejected") return "border border-red-400/30 text-red-400 hover:bg-red-400/10";
+  if (kind === "APPROVE") return "bg-accent text-white hover:bg-accent/90";
+  if (kind === "REJECT") return "border border-red-400/30 text-red-400 hover:bg-red-400/10";
   return "border border-accent/30 text-foreground hover:bg-accent/10";
 }
 
@@ -115,10 +119,12 @@ export default function ReviewPage() {
     pathname.split("/").filter(Boolean).pop() ||
     "";
 
-  const [decision, setDecision] = useState<Decision | null>(null);
+  const [decision, setDecision] = useState<HumanDecision | null>(null);
   const [data, setData] = useState<ApplicationReport | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [decisionError, setDecisionError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [submitting, setSubmitting] = useState(false);
   const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
@@ -138,9 +144,13 @@ export default function ReviewPage() {
         if (cancelled) return;
         setData(result);
         if (!result.report) {
+          setDecision(null);
           setError("No underwriting report is available yet. Process this application first.");
         } else {
           setError(null);
+          setDecision(
+            isHumanDecision(result.report.human_decision) ? result.report.human_decision : null,
+          );
         }
       } catch (err) {
         if (cancelled) return;
@@ -160,6 +170,34 @@ export default function ReviewPage() {
       cancelled = true;
     };
   }, [applicationId, attempt]);
+
+  async function handleDecision(nextDecision: HumanDecision) {
+    if (submitting || decision !== null) return;
+    setDecisionError(null);
+    setSubmitting(true);
+    try {
+      const result = await submitHumanDecision(applicationId, nextDecision);
+      setDecision(result.human_decision);
+      setData((current) => {
+        if (!current) return current;
+        return {
+          ...current,
+          application: { ...current.application, status: result.status },
+          report: current.report
+            ? { ...current.report, human_decision: result.human_decision }
+            : current.report,
+        };
+      });
+    } catch (err) {
+      setDecisionError(
+        err instanceof ApiError
+          ? err.message
+          : "Could not save the human decision. Please try again.",
+      );
+    } finally {
+      setSubmitting(false);
+    }
+  }
 
   if (loading) {
     return (
@@ -421,41 +459,54 @@ export default function ReviewPage() {
             Human Decision
           </h2>
           <p className="mt-1 text-sm text-foreground-secondary">
-            Inspect the system result above, then open the final report.
+            Inspect the system result above, then record the reviewer&apos;s final decision.
           </p>
 
           <div className="mt-6 flex flex-col gap-3 sm:flex-row">
             <button
               type="button"
-              onClick={() => setDecision("approved")}
-              disabled={decision !== null}
-              aria-pressed={decision === "approved"}
-              className={`${DECISION_BUTTON_BASE} ${decisionButtonClass("approved", decision)}`}
+              onClick={() => void handleDecision("APPROVE")}
+              disabled={submitting || decision !== null}
+              aria-pressed={decision === "APPROVE"}
+              className={`${DECISION_BUTTON_BASE} ${decisionButtonClass("APPROVE", decision)}`}
             >
               <ThumbsUp className="h-4 w-4" aria-hidden="true" />
               Approve
             </button>
             <button
               type="button"
-              onClick={() => setDecision("more_review")}
-              disabled={decision !== null}
-              aria-pressed={decision === "more_review"}
-              className={`${DECISION_BUTTON_BASE} ${decisionButtonClass("more_review", decision)}`}
+              onClick={() => void handleDecision("REQUEST_MORE_REVIEW")}
+              disabled={submitting || decision !== null}
+              aria-pressed={decision === "REQUEST_MORE_REVIEW"}
+              className={`${DECISION_BUTTON_BASE} ${decisionButtonClass("REQUEST_MORE_REVIEW", decision)}`}
             >
               <RotateCcw className="h-4 w-4" aria-hidden="true" />
               Request More Review
             </button>
             <button
               type="button"
-              onClick={() => setDecision("rejected")}
-              disabled={decision !== null}
-              aria-pressed={decision === "rejected"}
-              className={`${DECISION_BUTTON_BASE} ${decisionButtonClass("rejected", decision)}`}
+              onClick={() => void handleDecision("REJECT")}
+              disabled={submitting || decision !== null}
+              aria-pressed={decision === "REJECT"}
+              className={`${DECISION_BUTTON_BASE} ${decisionButtonClass("REJECT", decision)}`}
             >
               <ThumbsDown className="h-4 w-4" aria-hidden="true" />
               Reject
             </button>
           </div>
+
+          {submitting && (
+            <p role="status" aria-live="polite" className="mt-4 text-sm text-foreground-muted">
+              Saving decision...
+            </p>
+          )}
+
+          {decisionError && (
+            <p role="alert" className="mt-4 flex items-start gap-2 text-sm text-red-400">
+              <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+              <span>{decisionError}</span>
+            </p>
+          )}
 
           {decision && (
             <div
@@ -479,7 +530,7 @@ export default function ReviewPage() {
 
           <p className="mt-6 flex items-center gap-2 text-xs text-foreground-muted">
             <History className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-            This confirmation stays on this page. It does not change the stored application status.
+            This records the reviewer&apos;s final decision and updates the application status.
           </p>
         </section>
       </div>
