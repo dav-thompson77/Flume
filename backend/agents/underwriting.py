@@ -16,6 +16,9 @@ logger = logging.getLogger(__name__)
 
 EXPENSE_RATIO_HOLD_THRESHOLD = 0.85
 LOW_CONFIDENCE_THRESHOLD = 0.70
+# underwriting_actions.actor_type: AI/agent vs human vs system (FLUME.md section 12).
+# Same lowercase style as action="status_change" on this table.
+ACTOR_TYPE_AI = "ai"
 
 
 class UnderwritingError(Exception):
@@ -372,6 +375,7 @@ def _insert_audit_record(
 ) -> None:
     row = {
         "application_id": application_id,
+        "actor_type": ACTOR_TYPE_AI,
         "action": "status_change",
         "reason": reason,
         "previous_status": previous_status,

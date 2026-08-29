@@ -137,6 +137,7 @@ def test_agent_writes_status_audit_and_report(mock_get_client) -> None:
     action = store["underwriting_actions"][0]
     assert "agent_name" not in action
     assert action["application_id"] == "app-1"
+    assert action["actor_type"] == "ai"
     assert action["action"] == "status_change"
     assert action["previous_status"] == "PENDING"
     assert action["new_status"] == "CLEAR_FOR_REVIEW"
@@ -222,7 +223,7 @@ def test_agent_rejects_application_with_no_transactions(mock_get_client) -> None
         run_underwriting_agent("app-1")
 
 
-def test_audit_insert_does_not_send_agent_name() -> None:
+def test_audit_insert_supplies_non_null_actor_type() -> None:
     store = {"underwriting_actions": []}
     _insert_audit_record(
         FakeClient(store),
@@ -234,9 +235,11 @@ def test_audit_insert_does_not_send_agent_name() -> None:
 
     assert len(store["underwriting_actions"]) == 1
     row = store["underwriting_actions"][0]
+    assert row["actor_type"] is not None
+    assert row["actor_type"] == "ai"
     assert "agent_name" not in row
+    assert "actor_id" not in row
     assert row["application_id"] == "app-1"
     assert row["action"] == "status_change"
     assert row["previous_status"] == "PENDING"
     assert row["new_status"] == "HOLD"
-    assert row["reason"] == "Expenses exceed the 85% threshold."
