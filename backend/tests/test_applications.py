@@ -127,3 +127,98 @@ def test_process_requires_at_least_one_document(mock_get_client) -> None:
     response = client.post("/applications/app-1/process")
 
     assert response.status_code == 400
+
+
+@patch("main.run_underwriting_agent")
+@patch("main.run_intake_agent")
+@patch("main.get_supabase_client")
+def test_process_returns_transactions_and_underwriting(
+    mock_get_client, mock_intake, mock_underwriting
+) -> None:
+    mock_get_client.return_value = _make_supabase_mock(
+        applications_data=[{"id": "app-1", "status": "PENDING"}],
+        documents_data=[{"id": "doc-1", "application_id": "app-1"}],
+    )
+    mock_intake.return_value = [
+        {
+            "id": "tx-1",
+            "document_id": "doc-1",
+            "vendor": "Island Grocers",
+            "transaction_date": "2026-08-20",
+            "amount": 125.5,
+            "category": "sales",
+            "confidence": 0.94,
+        }
+    ]
+    mock_underwriting.return_value = {
+        "application_id": "app-1",
+        "total_revenue": 125.5,
+        "total_expenses": 0.0,
+        "expense_ratio": 0.0,
+        "average_order_value": 125.5,
+        "risk_level": "LOW",
+        "previous_status": "PENDING",
+        "new_status": "CLEAR_FOR_REVIEW",
+        "reason": "The financial metrics and extraction confidence passed the MVP rules.",
+        "summary": (
+            "Revenue totaled $125.50 with $0 in expenses, "
+            "resulting in an expense ratio of 0%."
+        ),
+    }
+
+    response = client.post("/applications/app-1/process")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["transactions_extracted"] == 1
+    assert body["underwriting"]["new_status"] == "CLEAR_FOR_REVIEW"
+    mock_underwriting.assert_called_once_with("app-1")
+
+
+@patch("main.get_supabase_client")
+def test_report_requires_application(mock_get_client) -> None:
+    mock_get_client.return_value = _make_supabase_mock(applications_data=[])
+
+    response = client.get("/applications/missing-app/report")
+
+    assert response.status_code == 404
+
+
+@patch("main.get_supabase_client")
+def test_report_returns_null_when_underwriting_has_not_run(mock_get_client) -> None:
+    fake_client = MagicMock()
+
+    def table_side_effect(name):
+        table_mock = MagicMock()
+        if name == "applications":
+            table_mock.select.return_value.eq.return_value.execute.return_value.data = [
+                {
+                    "id": "app-1",
+                    "merchant_name": "Island Grocers",
+                    "status": "PENDING",
+                    "created_at": "2026-08-01T00:00:00Z",
+                }
+            ]
+        elif name == "documents":
+            table_mock.select.return_value.eq.return_value.execute.return_value.data = []
+        elif name == "reports":
+            (
+                table_mock.select.return_value.eq.return_value.order.return_value.limit.return_value.execute.return_value.data
+            ) = []
+        elif name == "underwriting_actions":
+            (
+                table_mock.select.return_value.eq.return_value.order.return_value.execute.return_value.data
+            ) = []
+        return table_mock
+
+    fake_client.table.side_effect = table_side_effect
+    mock_get_client.return_value = fake_client
+
+    response = client.get("/applications/app-1/report")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["application"]["id"] == "app-1"
+    assert body["transactions"] == []
+    assert body["report"] is None
+    assert body["underwriting_actions"] == []
