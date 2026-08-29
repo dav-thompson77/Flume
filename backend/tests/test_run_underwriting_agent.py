@@ -135,15 +135,15 @@ def test_agent_writes_status_audit_and_report(mock_get_client) -> None:
     assert store["applications"][0]["status"] == "CLEAR_FOR_REVIEW"
     assert len(store["underwriting_actions"]) == 1
     action = store["underwriting_actions"][0]
-    assert "agent_name" not in action
     assert action["application_id"] == "app-1"
     assert action["actor_type"] == "ai"
     assert action["actor_name"] == "Underwriting Agent"
     assert action["action"] == "status_change"
-    assert action["from_status"] == "PENDING"
-    assert action["to_status"] == "CLEAR_FOR_REVIEW"
-    assert "previous_status" not in action
-    assert "new_status" not in action
+    assert action["previous_status"] == "PENDING"
+    assert action["new_status"] == "CLEAR_FOR_REVIEW"
+    assert "agent_name" not in action
+    assert "from_status" not in action
+    assert "to_status" not in action
     assert "actor_id" not in action
     assert len(store["reports"]) == 1
     assert "12,500" in result["summary"]
@@ -178,8 +178,8 @@ def test_agent_is_idempotent_when_a_report_already_exists(mock_get_client) -> No
             "application_id": "app-1",
             "action": "status_change",
             "reason": "Already processed.",
-            "from_status": "PENDING",
-            "to_status": "CLEAR_FOR_REVIEW",
+            "previous_status": "PENDING",
+            "new_status": "CLEAR_FOR_REVIEW",
             "created_at": "2026-08-29T00:00:00Z",
         }
     ]
@@ -239,16 +239,25 @@ def test_audit_insert_matches_underwriting_actions_schema() -> None:
 
     assert len(store["underwriting_actions"]) == 1
     row = store["underwriting_actions"][0]
+    assert set(row.keys()) == {
+        "application_id",
+        "actor_type",
+        "actor_name",
+        "action",
+        "reason",
+        "previous_status",
+        "new_status",
+    }
     assert row["application_id"] == "app-1"
     assert row["actor_type"] == "ai"
     assert row["actor_name"] == "Underwriting Agent"
     assert row["action"] == "status_change"
     assert row["reason"] == "Expenses exceed the 85% threshold."
-    assert row["from_status"] == "PENDING"
-    assert row["to_status"] == "HOLD"
+    assert row["previous_status"] == "PENDING"
+    assert row["new_status"] == "HOLD"
     assert row["actor_type"] is not None
     assert row["actor_name"] is not None
     assert "agent_name" not in row
+    assert "from_status" not in row
+    assert "to_status" not in row
     assert "actor_id" not in row
-    assert "previous_status" not in row
-    assert "new_status" not in row
