@@ -2,7 +2,7 @@
 
 ### AI-Assisted Financial Underwriting for Caribbean MSMEs
 
-Flume turns messy merchant financial records into a structured financial profile and underwriting recommendation — helping lenders review small businesses faster.
+Flume turns messy merchant financial records into a structured financial profile and underwriting recommendation, helping lenders review small businesses faster.
 
 ---
 
