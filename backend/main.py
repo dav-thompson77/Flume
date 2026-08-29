@@ -33,15 +33,14 @@ logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Flume API")
 
-# CORS: allow the deployed frontend (from the FRONTEND_URL environment
-# variable) plus common local dev origins, so `npm run dev` keeps working
-# without needing its own env var. Intentionally never "*" - the API is
-# meant to be called by the Flume frontend, not by arbitrary origins.
-FRONTEND_URL = os.getenv("FRONTEND_URL")
-
+# CORS: allow the deployed Vercel frontend and common local Next.js origins.
+# FRONTEND_URL can still add another origin without a code change.
+# Intentionally never "*": the API is meant to be called by the Flume frontend.
+PRODUCTION_FRONTEND_ORIGIN = "https://flume-rosy.vercel.app"
 DEV_ORIGINS = ["http://localhost:3000", "http://127.0.0.1:3000"]
 
-allow_origins = list(DEV_ORIGINS)
+allow_origins = [PRODUCTION_FRONTEND_ORIGIN, *DEV_ORIGINS]
+FRONTEND_URL = os.getenv("FRONTEND_URL", "").strip().rstrip("/")
 if FRONTEND_URL and FRONTEND_URL not in allow_origins:
     allow_origins.append(FRONTEND_URL)
 
