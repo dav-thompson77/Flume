@@ -1,13 +1,15 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import {
+  AlertCircle,
   ArrowLeft,
   BadgeCheck,
   CircleCheck,
   Gauge,
   Info,
+  Loader2,
   Percent,
   Plus,
   Receipt,
@@ -17,23 +19,22 @@ import {
   TriangleAlert,
   Wallet,
 } from "lucide-react";
-
-// Mock financial snapshot - kept identical to the Human Review page
-// (FLUME.md section 11 / 12) so the two pages agree with each other.
-const FINANCIALS = [
-  { label: "Revenue", value: "$23,900", icon: Wallet },
-  { label: "Expenses", value: "$18,400", icon: Receipt },
-  { label: "Expense Ratio", value: "76.99%", icon: Percent },
-  { label: "Average Order Value", value: "$187", icon: TrendingUp },
-] as const;
+import {
+  ApiError,
+  getApplicationReport,
+  type ApplicationReport,
+  type UnderwritingAction,
+} from "@/lib/api";
+import {
+  formatLabel,
+  formatMoney,
+  formatRatio,
+  formatTimestamp,
+  riskBadgeClass,
+  statusBadgeClass,
+} from "@/lib/format";
 
 type FlagSeverity = "attention" | "neutral" | "positive";
-
-const RISK_FINDINGS: { label: string; severity: FlagSeverity }[] = [
-  { label: "Low-confidence transaction detected", severity: "attention" },
-  { label: "Expense ratio below the high-risk threshold", severity: "positive" },
-  { label: "No obvious revenue anomaly detected", severity: "positive" },
-];
 
 const FLAG_STYLES: Record<
   FlagSeverity,
@@ -62,94 +63,110 @@ const FLAG_STYLES: Record<
   },
 };
 
-type Transaction = {
-  vendor: string;
-  date: string;
-  amount: string;
-  category: string;
-  confidence: number;
-};
-
-// Same mock transactions shown on the Human Review page - kept identical
-// so the two pages describe the same underwriting evidence.
-const TRANSACTIONS: Transaction[] = [
-  { vendor: "Kingston Hardware Supplies", date: "2026-01-03", amount: "$842.00", category: "Inventory", confidence: 0.96 },
-  { vendor: "Half Moon Bay Bakery", date: "2026-01-05", amount: "$215.50", category: "Supplies", confidence: 0.91 },
-  { vendor: "Portmore Wholesale Foods", date: "2026-01-08", amount: "$1,340.00", category: "Inventory", confidence: 0.88 },
-  { vendor: "Blue Mountain Coffee Traders", date: "2026-01-10", amount: "$67.25", category: "Supplies", confidence: 0.64 },
-  { vendor: "Falmouth Fuel & Gas", date: "2026-01-12", amount: "$310.00", category: "Utilities", confidence: 0.93 },
-  { vendor: "Ocho Rios Print & Signage", date: "2026-01-15", amount: "$145.00", category: "Marketing", confidence: 0.77 },
-  { vendor: "Spanish Town Equipment Rentals", date: "2026-01-18", amount: "$980.00", category: "Equipment", confidence: 0.82 },
-];
-
 const LOW_CONFIDENCE_THRESHOLD = 0.7;
 
-type AuditEvent = {
-  title: string;
-  description: string;
-  timestamp: string;
-};
+function flagSeverityForRisk(riskLevel: string): FlagSeverity {
+  const key = riskLevel.toUpperCase();
+  if (key === "HIGH") return "attention";
+  if (key === "MEDIUM") return "attention";
+  if (key === "LOW") return "positive";
+  return "neutral";
+}
 
-// Mock audit trail (FLUME.md section 12/21). Frontend-only - these events
-// are not actually persisted anywhere yet.
-const AUDIT_EVENTS: AuditEvent[] = [
-  {
-    title: "Application created",
-    description: "Flume created a new underwriting application for this merchant.",
-    timestamp: "Jan 20, 2026 · 9:02 AM",
-  },
-  {
-    title: "Financial records uploaded",
-    description: "The bank worker uploaded receipts and transaction records for review.",
-    timestamp: "Jan 20, 2026 · 9:03 AM",
-  },
-  {
-    title: "Transactions extracted",
-    description: "Flume extracted structured transaction data from the uploaded records.",
-    timestamp: "Jan 20, 2026 · 9:04 AM",
-  },
-  {
-    title: "Underwriting analysis completed",
-    description: "Flume calculated financial health metrics and evaluated risk rules.",
-    timestamp: "Jan 20, 2026 · 9:05 AM",
-  },
-  {
-    title: "AI recommendation generated",
-    description: "Flume produced a recommendation based on the calculated metrics and extracted evidence.",
-    timestamp: "Jan 20, 2026 · 9:05 AM",
-  },
-  {
-    title: "Human review completed",
-    description: "A bank reviewer examined the AI findings and extracted transactions.",
-    timestamp: "Jan 20, 2026 · 9:12 AM",
-  },
-  {
-    title: "Application approved",
-    description: "The reviewer approved the application following manual review.",
-    timestamp: "Jan 20, 2026 · 9:12 AM",
-  },
-];
+function latestAction(actions: UnderwritingAction[]): UnderwritingAction | null {
+  if (actions.length === 0) return null;
+  return actions[actions.length - 1];
+}
 
 export default function ReportPage() {
   const router = useRouter();
   const params = useParams<{ id: string }>();
   const applicationId = params.id;
 
-  // One-time read of what the Upload page stored for this application id.
-  // Guarded for the server-rendered pass, where sessionStorage doesn't exist.
-  const [merchantName] = useState<string | null>(() => {
-    if (typeof window === "undefined" || !applicationId) return null;
-    try {
-      const raw = sessionStorage.getItem(`flume:application:${applicationId}`);
-      if (!raw) return null;
-      const stored = JSON.parse(raw) as { merchantName?: string };
-      return stored.merchantName ?? null;
-    } catch {
-      return null;
-    }
-  });
+  const [data, setData] = useState<ApplicationReport | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [attempt, setAttempt] = useState(0);
 
-  const merchantLabel = merchantName ?? "Merchant Application";
+  useEffect(() => {
+    if (!applicationId) return;
+
+    let cancelled = false;
+
+    async function loadReport() {
+      try {
+        const result = await getApplicationReport(applicationId);
+        if (cancelled) return;
+        setData(result);
+        if (!result.report) {
+          setError("No underwriting report is available yet. Process this application first.");
+        } else {
+          setError(null);
+        }
+      } catch (err) {
+        if (cancelled) return;
+        setData(null);
+        setError(
+          err instanceof ApiError ? err.message : "Could not load the report. Please try again.",
+        );
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+
+    void loadReport();
+    return () => {
+      cancelled = true;
+    };
+  }, [applicationId, attempt]);
+
+  if (loading) {
+    return (
+      <main className="flex flex-1 justify-center px-6 py-16 sm:px-8 sm:py-24">
+        <div className="flex flex-col items-center gap-3 text-foreground-muted">
+          <Loader2 className="h-6 w-6 animate-spin text-accent" aria-hidden="true" />
+          <p className="text-sm font-medium">Loading report...</p>
+        </div>
+      </main>
+    );
+  }
+
+  if (error || !data?.report) {
+    return (
+      <main className="flex flex-1 justify-center px-6 py-16 sm:px-8 sm:py-24">
+        <div className="mx-auto flex w-full max-w-xl flex-col items-center gap-4 rounded-card border border-border bg-surface p-6 text-center shadow-large sm:p-8">
+          <p role="alert" className="flex items-start gap-2 text-sm text-red-400">
+            <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+            <span>{error ?? "Could not load the report."}</span>
+          </p>
+          <button
+            type="button"
+            onClick={() => {
+              setError(null);
+              setLoading(true);
+              setAttempt((value) => value + 1);
+            }}
+            className="rounded-button bg-accent px-5 py-2.5 text-sm font-semibold text-white transition-colors duration-200 hover:bg-accent/90"
+          >
+            Retry
+          </button>
+        </div>
+      </main>
+    );
+  }
+
+  const { application, transactions, report, underwriting_actions: actions } = data;
+  const action = latestAction(actions);
+  const reason = action?.reason || report.summary || "No underwriting reason was recorded.";
+  const merchantLabel = application.merchant_name;
+  const financials = [
+    { label: "Revenue", value: formatMoney(report.total_revenue), icon: Wallet },
+    { label: "Expenses", value: formatMoney(report.total_expenses), icon: Receipt },
+    { label: "Expense Ratio", value: formatRatio(report.expense_ratio), icon: Percent },
+    { label: "Average Order Value", value: formatMoney(report.average_order_value), icon: TrendingUp },
+  ];
+  const flagSeverity = flagSeverityForRisk(report.risk_level);
+  const FlagIcon = FLAG_STYLES[flagSeverity].icon;
 
   return (
     <main className="flex flex-1 justify-center px-6 py-12 sm:px-8 sm:py-16 lg:py-20">
@@ -164,8 +181,10 @@ export default function ReportPage() {
                 AI-assisted financial analysis and underwriting decision.
               </p>
             </div>
-            <span className="shrink-0 rounded-badge border border-accent-secondary/30 bg-accent-secondary/10 px-4 py-1.5 text-xs font-semibold uppercase tracking-widest text-accent-secondary">
-              Review completed
+            <span
+              className={`shrink-0 rounded-badge border px-4 py-1.5 text-xs font-semibold uppercase tracking-widest ${statusBadgeClass(application.status)}`}
+            >
+              {formatLabel(application.status)}
             </span>
           </div>
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-foreground-muted">
@@ -189,18 +208,20 @@ export default function ReportPage() {
                   id="final-decision-heading"
                   className="text-2xl font-extrabold tracking-tight text-foreground sm:text-3xl"
                 >
-                  APPROVED
+                  {formatLabel(application.status)}
                 </h2>
-                <p className="text-sm font-semibold text-foreground-secondary">Human decision</p>
+                <p className="text-sm font-semibold text-foreground-secondary">Application status</p>
               </div>
             </div>
-            <span className="inline-flex shrink-0 items-center gap-1.5 rounded-badge border border-amber-400/30 bg-amber-400/10 px-3 py-1 text-xs font-bold uppercase tracking-widest text-amber-400">
+            <span
+              className={`inline-flex shrink-0 items-center gap-1.5 rounded-badge border px-3 py-1 text-xs font-bold uppercase tracking-widest ${riskBadgeClass(report.risk_level)}`}
+            >
               <ShieldAlert className="h-3.5 w-3.5" aria-hidden="true" />
-              AI Recommendation: Manual Review
+              Risk: {formatLabel(report.risk_level)}
             </span>
           </div>
           <p className="mt-4 text-sm leading-relaxed text-foreground-secondary sm:text-base">
-            Approved after reviewing Flume&apos;s financial analysis.
+            {reason}
           </p>
         </section>
 
@@ -212,7 +233,7 @@ export default function ReportPage() {
             Metrics calculated from the extracted transactions below.
           </p>
           <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            {FINANCIALS.map(({ label, value, icon: Icon }) => (
+            {financials.map(({ label, value, icon: Icon }) => (
               <div
                 key={label}
                 className="rounded-card border border-border bg-surface p-5 shadow-large"
@@ -234,26 +255,24 @@ export default function ReportPage() {
             <h2 id="risk-assessment-heading" className="text-lg font-bold text-foreground sm:text-xl">
               Risk Assessment
             </h2>
-            <span className="inline-flex items-center gap-1.5 rounded-badge border border-amber-400/30 bg-amber-400/10 px-3 py-1 text-xs font-bold uppercase tracking-widest text-amber-400">
+            <span
+              className={`inline-flex items-center gap-1.5 rounded-badge border px-3 py-1 text-xs font-bold uppercase tracking-widest ${riskBadgeClass(report.risk_level)}`}
+            >
               <Gauge className="h-3.5 w-3.5" aria-hidden="true" />
-              Medium Risk
+              {formatLabel(report.risk_level)} Risk
             </span>
           </div>
           <ul className="mt-4 flex flex-col gap-3">
-            {RISK_FINDINGS.map((flag) => {
-              const style = FLAG_STYLES[flag.severity];
-              const Icon = style.icon;
-              return (
-                <li
-                  key={flag.label}
-                  className={`flex items-center gap-3 rounded-card border p-4 ${style.border} ${style.bg}`}
-                >
-                  <Icon className={`h-5 w-5 shrink-0 ${style.text}`} aria-hidden="true" />
-                  <span className="text-sm font-medium text-foreground">{flag.label}</span>
-                  <span className="sr-only">{style.srLabel}</span>
-                </li>
-              );
-            })}
+            <li
+              className={`flex items-center gap-3 rounded-card border p-4 ${FLAG_STYLES[flagSeverity].border} ${FLAG_STYLES[flagSeverity].bg}`}
+            >
+              <FlagIcon
+                className={`h-5 w-5 shrink-0 ${FLAG_STYLES[flagSeverity].text}`}
+                aria-hidden="true"
+              />
+              <span className="text-sm font-medium text-foreground">{reason}</span>
+              <span className="sr-only">{FLAG_STYLES[flagSeverity].srLabel}</span>
+            </li>
           </ul>
         </section>
 
@@ -286,18 +305,25 @@ export default function ReportPage() {
                 </tr>
               </thead>
               <tbody>
-                {TRANSACTIONS.map((tx) => {
+                {transactions.length === 0 && (
+                  <tr>
+                    <td colSpan={5} className="px-5 py-6 text-sm text-foreground-muted">
+                      No transactions were extracted for this application.
+                    </td>
+                  </tr>
+                )}
+                {transactions.map((tx, index) => {
                   const isLowConfidence = tx.confidence < LOW_CONFIDENCE_THRESHOLD;
                   return (
                     <tr
-                      key={`${tx.vendor}-${tx.date}`}
+                      key={tx.id ?? `${tx.vendor}-${tx.transaction_date}-${index}`}
                       className={`border-b border-border transition-colors duration-200 last:border-0 hover:bg-surface-alt/60 ${
                         isLowConfidence ? "bg-amber-400/5" : ""
                       }`}
                     >
                       <td className="px-5 py-3 font-medium text-foreground">{tx.vendor}</td>
-                      <td className="px-5 py-3 text-foreground-secondary">{tx.date}</td>
-                      <td className="px-5 py-3 text-foreground-secondary">{tx.amount}</td>
+                      <td className="px-5 py-3 text-foreground-secondary">{tx.transaction_date}</td>
+                      <td className="px-5 py-3 text-foreground-secondary">{formatMoney(tx.amount)}</td>
                       <td className="px-5 py-3 text-foreground-secondary">{tx.category}</td>
                       <td className="px-5 py-3">
                         <span
@@ -332,40 +358,43 @@ export default function ReportPage() {
           <dl className="mt-4 grid grid-cols-1 gap-5 sm:grid-cols-2">
             <div>
               <dt className="text-xs font-semibold uppercase tracking-widest text-foreground-muted">
-                AI Recommendation
+                Risk Level
               </dt>
               <dd className="mt-1.5">
-                <span className="inline-flex items-center gap-1.5 rounded-badge border border-amber-400/30 bg-amber-400/10 px-3 py-1 text-xs font-bold uppercase tracking-widest text-amber-400">
+                <span
+                  className={`inline-flex items-center gap-1.5 rounded-badge border px-3 py-1 text-xs font-bold uppercase tracking-widest ${riskBadgeClass(report.risk_level)}`}
+                >
                   <ShieldAlert className="h-3.5 w-3.5" aria-hidden="true" />
-                  Manual Review
+                  {formatLabel(report.risk_level)}
                 </span>
               </dd>
             </div>
             <div>
               <dt className="text-xs font-semibold uppercase tracking-widest text-foreground-muted">
-                Human Decision
+                Application Status
               </dt>
               <dd className="mt-1.5">
-                <span className="inline-flex items-center gap-1.5 rounded-badge border border-accent/30 bg-accent/10 px-3 py-1 text-xs font-bold uppercase tracking-widest text-accent">
+                <span
+                  className={`inline-flex items-center gap-1.5 rounded-badge border px-3 py-1 text-xs font-bold uppercase tracking-widest ${statusBadgeClass(application.status)}`}
+                >
                   <BadgeCheck className="h-3.5 w-3.5" aria-hidden="true" />
-                  Approved
+                  {formatLabel(application.status)}
                 </span>
               </dd>
             </div>
             <div>
               <dt className="text-xs font-semibold uppercase tracking-widest text-foreground-muted">
-                Reviewer Action
+                Recorded By
               </dt>
-              <dd className="mt-1.5 text-sm font-semibold text-foreground">Approved</dd>
+              <dd className="mt-1.5 text-sm font-semibold text-foreground">
+                {action?.agent_name || "Underwriting Agent"}
+              </dd>
             </div>
             <div className="sm:col-span-2">
               <dt className="text-xs font-semibold uppercase tracking-widest text-foreground-muted">
                 Reason
               </dt>
-              <dd className="mt-1.5 text-sm leading-relaxed text-foreground-secondary">
-                Financial performance was considered acceptable after review of the extracted
-                transactions and risk flags.
-              </dd>
+              <dd className="mt-1.5 text-sm leading-relaxed text-foreground-secondary">{reason}</dd>
             </div>
           </dl>
         </section>
@@ -378,23 +407,35 @@ export default function ReportPage() {
             The sequence of actions recorded for this application.
           </p>
           <ol className="mt-4 flex flex-col rounded-card border border-border bg-surface p-6 shadow-large sm:p-8">
-            {AUDIT_EVENTS.map((event, index) => (
-              <li key={event.title} className="relative flex gap-4 pb-6 last:pb-0">
-                {index < AUDIT_EVENTS.length - 1 && (
+            {actions.length === 0 && (
+              <li className="text-sm text-foreground-muted">No audit records yet.</li>
+            )}
+            {actions.map((event, index) => (
+              <li key={event.id ?? `${event.action}-${index}`} className="relative flex gap-4 pb-6 last:pb-0">
+                {index < actions.length - 1 && (
                   <span
                     aria-hidden="true"
                     className="absolute left-4 top-8 h-[calc(100%-1rem)] w-px bg-border"
                   />
                 )}
                 <span className="relative z-10 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-accent/10 text-accent">
-                  <CircleCheck className="h-4 w-4" aria-hidden="true" />
+                  <CircleCheck className="h-4 w-4" />
                 </span>
                 <div className="flex-1 pt-1">
                   <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
-                    <p className="text-sm font-semibold text-foreground">{event.title}</p>
-                    <span className="text-xs text-foreground-muted">{event.timestamp}</span>
+                    <p className="text-sm font-semibold text-foreground">
+                      {event.previous_status && event.new_status
+                        ? `${formatLabel(event.previous_status)} → ${formatLabel(event.new_status)}`
+                        : formatLabel(event.action ?? "Status change")}
+                    </p>
+                    <span className="text-xs text-foreground-muted">
+                      {formatTimestamp(event.created_at)}
+                    </span>
                   </div>
-                  <p className="mt-1 text-sm text-foreground-secondary">{event.description}</p>
+                  <p className="mt-1 text-sm text-foreground-secondary">
+                    {event.reason || "Status change recorded."}
+                    {event.agent_name ? ` · ${event.agent_name}` : ""}
+                  </p>
                 </div>
               </li>
             ))}
@@ -412,13 +453,10 @@ export default function ReportPage() {
             </h2>
           </div>
           <p className="mt-4 text-sm leading-relaxed text-foreground-secondary sm:text-base">
-            Revenue and transaction activity indicate a consistently operating business. Expenses
-            represent a significant portion of revenue but remain below the high-risk threshold
-            used in this assessment. One low-confidence transaction was identified and reviewed
-            during underwriting.
+            {report.summary || "No summary was recorded for this application."}
           </p>
           <p className="mt-4 text-xs font-semibold uppercase tracking-widest text-foreground-muted">
-            AI-generated summary
+            Underwriting summary
           </p>
         </section>
 
