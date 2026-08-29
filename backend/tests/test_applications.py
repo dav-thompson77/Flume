@@ -225,7 +225,7 @@ def test_report_returns_null_when_underwriting_has_not_run(mock_get_client) -> N
 
 
 @patch("main.get_supabase_client")
-def test_report_maps_explanation_to_summary_for_frontend(mock_get_client) -> None:
+def test_report_maps_live_columns_for_frontend(mock_get_client) -> None:
     fake_client = MagicMock()
 
     def table_side_effect(name):
@@ -253,7 +253,9 @@ def test_report_maps_explanation_to_summary_for_frontend(mock_get_client) -> Non
                     "expense_ratio": 0.64,
                     "average_order_value": 12500.0,
                     "risk_level": "LOW",
-                    "explanation": "Revenue totaled $12,500 with $8,000 in expenses.",
+                    "ai_recommendation": "CLEAR_FOR_REVIEW",
+                    "ai_summary": "Revenue totaled $12,500 with $8,000 in expenses.",
+                    "human_decision": None,
                     "created_at": "2026-08-29T00:00:00Z",
                 }
             ]
@@ -271,7 +273,10 @@ def test_report_maps_explanation_to_summary_for_frontend(mock_get_client) -> Non
     assert response.status_code == 200
     body = response.json()
     report = body["report"]
-    assert report["explanation"] == "Revenue totaled $12,500 with $8,000 in expenses."
+    assert report["ai_summary"] == "Revenue totaled $12,500 with $8,000 in expenses."
     assert report["summary"] == "Revenue totaled $12,500 with $8,000 in expenses."
+    assert report["ai_recommendation"] == "CLEAR_FOR_REVIEW"
+    assert report["recommendation"] == "CLEAR_FOR_REVIEW"
+    assert report["expense_ratio"] == 0.64
     assert report["total_revenue"] == 12500.0
     assert report["risk_level"] == "LOW"
