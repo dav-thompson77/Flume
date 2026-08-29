@@ -123,3 +123,6 @@ Flume is an AI-assisted underwriting prototype built for the Future Caribbean Gl
 The MVP focuses on turning unstructured merchant financial records into structured evidence that a human reviewer can use to make a faster, more informed underwriting decision.
 
 Human review remains the final decision point.
+
+## License
+MIT
