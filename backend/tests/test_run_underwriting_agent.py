@@ -239,7 +239,9 @@ def test_audit_insert_matches_underwriting_actions_schema() -> None:
 
     assert len(store["underwriting_actions"]) == 1
     row = store["underwriting_actions"][0]
-    assert set(row.keys()) == {
+    # FakeClient adds id/created_at as table defaults; Python must not send them.
+    payload_keys = set(row.keys()) - {"id", "created_at"}
+    assert payload_keys == {
         "application_id",
         "actor_type",
         "actor_name",
