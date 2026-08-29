@@ -16,7 +16,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from agents.intake import IntakeError, run_intake_agent
-from agents.underwriting import UnderwritingError, run_underwriting_agent
+from agents.underwriting import UnderwritingError, report_row_for_api, run_underwriting_agent
 from minimax_client import MiniMaxError
 from schemas import (
     ApplicationCreate,
@@ -281,7 +281,7 @@ def get_application_report(application_id: str) -> dict:
             .limit(1)
             .execute()
         )
-        report = reports_result.data[0] if reports_result.data else None
+        report = report_row_for_api(reports_result.data[0] if reports_result.data else None)
 
         actions_result = (
             client.table("underwriting_actions")

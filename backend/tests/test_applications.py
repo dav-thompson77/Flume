@@ -222,3 +222,56 @@ def test_report_returns_null_when_underwriting_has_not_run(mock_get_client) -> N
     assert body["transactions"] == []
     assert body["report"] is None
     assert body["underwriting_actions"] == []
+
+
+@patch("main.get_supabase_client")
+def test_report_maps_explanation_to_summary_for_frontend(mock_get_client) -> None:
+    fake_client = MagicMock()
+
+    def table_side_effect(name):
+        table_mock = MagicMock()
+        if name == "applications":
+            table_mock.select.return_value.eq.return_value.execute.return_value.data = [
+                {
+                    "id": "app-1",
+                    "merchant_name": "Island Grocers",
+                    "status": "CLEAR_FOR_REVIEW",
+                    "created_at": "2026-08-01T00:00:00Z",
+                }
+            ]
+        elif name == "documents":
+            table_mock.select.return_value.eq.return_value.execute.return_value.data = []
+        elif name == "reports":
+            (
+                table_mock.select.return_value.eq.return_value.order.return_value.limit.return_value.execute.return_value.data
+            ) = [
+                {
+                    "id": "report-1",
+                    "application_id": "app-1",
+                    "total_revenue": 12500.0,
+                    "total_expenses": 8000.0,
+                    "expense_ratio": 0.64,
+                    "average_order_value": 12500.0,
+                    "risk_level": "LOW",
+                    "explanation": "Revenue totaled $12,500 with $8,000 in expenses.",
+                    "created_at": "2026-08-29T00:00:00Z",
+                }
+            ]
+        elif name == "underwriting_actions":
+            (
+                table_mock.select.return_value.eq.return_value.order.return_value.execute.return_value.data
+            ) = []
+        return table_mock
+
+    fake_client.table.side_effect = table_side_effect
+    mock_get_client.return_value = fake_client
+
+    response = client.get("/applications/app-1/report")
+
+    assert response.status_code == 200
+    body = response.json()
+    report = body["report"]
+    assert report["explanation"] == "Revenue totaled $12,500 with $8,000 in expenses."
+    assert report["summary"] == "Revenue totaled $12,500 with $8,000 in expenses."
+    assert report["total_revenue"] == 12500.0
+    assert report["risk_level"] == "LOW"
