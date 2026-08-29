@@ -23,6 +23,13 @@ LOW_CONFIDENCE_THRESHOLD = 0.70
 ACTOR_TYPE_AI = "ai"
 ACTOR_NAME_UNDERWRITING_AGENT = "Underwriting Agent"
 
+# Live reports columns (FLUME.md §§16-17 + PostgREST):
+# application_id, total_revenue, total_expenses, expense_ratio, average_order_value,
+# risk_level, explanation. `summary` is not a column (PGRST204). Do not send it.
+# recommendation / risk_flags are FLUME.md assessment fields but are not in the
+# current insert; the AI recommendation is already stored on applications.status
+# and underwriting_actions.new_status.
+
 
 class UnderwritingError(Exception):
     """Raised when underwriting cannot produce a valid result."""
@@ -357,7 +364,7 @@ def _result_from_existing(client, application_id: str, report: dict) -> dict:
         "previous_status": action.get("previous_status"),
         "new_status": action.get("new_status"),
         "reason": action.get("reason") or "",
-        "summary": report.get("summary") or "",
+        "summary": report.get("explanation") or "",
     }
 
 
@@ -395,6 +402,19 @@ def _insert_audit_record(
         )
 
 
+def report_row_for_api(row: dict | None) -> dict | None:
+    """Map a reports table row to the GET /report JSON the frontend already reads.
+
+    The table stores the written analysis as `explanation`. The frontend
+    reads `summary`, so copy it there. Do not change frontend code.
+    """
+    if row is None:
+        return None
+    mapped = dict(row)
+    mapped["summary"] = mapped.get("explanation") or ""
+    return mapped
+
+
 def _insert_report(
     client,
     *,
@@ -410,7 +430,7 @@ def _insert_report(
         "expense_ratio": metrics["expense_ratio"],
         "average_order_value": metrics["average_order_value"],
         "risk_level": risk_level,
-        "summary": summary,
+        "explanation": summary,
     }
     result = _execute(
         client.table("reports").insert(row),

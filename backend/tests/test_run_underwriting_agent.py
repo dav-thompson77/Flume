@@ -8,7 +8,13 @@ from unittest.mock import patch
 
 import pytest
 
-from agents.underwriting import UnderwritingError, _insert_audit_record, run_underwriting_agent
+from agents.underwriting import (
+    UnderwritingError,
+    _insert_audit_record,
+    _insert_report,
+    report_row_for_api,
+    run_underwriting_agent,
+)
 
 
 class FakeResult:
@@ -146,6 +152,16 @@ def test_agent_writes_status_audit_and_report(mock_get_client) -> None:
     assert "to_status" not in action
     assert "actor_id" not in action
     assert len(store["reports"]) == 1
+    report = store["reports"][0]
+    assert report["application_id"] == "app-1"
+    assert report["total_revenue"] == 12500.0
+    assert report["total_expenses"] == 8000.0
+    assert report["expense_ratio"] == 8000.0 / 12500.0
+    assert report["average_order_value"] == 12500.0
+    assert report["risk_level"] == "LOW"
+    assert "12,500" in report["explanation"]
+    assert "8,000" in report["explanation"]
+    assert "summary" not in report
     assert "12,500" in result["summary"]
     assert "8,000" in result["summary"]
 
@@ -168,7 +184,7 @@ def test_agent_is_idempotent_when_a_report_already_exists(mock_get_client) -> No
             "expense_ratio": 0.2,
             "average_order_value": 1000.0,
             "risk_level": "LOW",
-            "summary": "Existing summary.",
+            "explanation": "Existing summary.",
             "created_at": "2026-08-29T00:00:00Z",
         }
     ]
@@ -263,3 +279,64 @@ def test_audit_insert_matches_underwriting_actions_schema() -> None:
     assert "from_status" not in row
     assert "to_status" not in row
     assert "actor_id" not in row
+
+
+def test_report_insert_matches_reports_schema() -> None:
+    store = {"reports": []}
+    _insert_report(
+        FakeClient(store),
+        application_id="app-1",
+        metrics={
+            "total_revenue": 12500.0,
+            "total_expenses": 8000.0,
+            "expense_ratio": 0.64,
+            "average_order_value": 12500.0,
+        },
+        risk_level="LOW",
+        summary="Revenue totaled $12,500 with $8,000 in expenses.",
+    )
+
+    assert len(store["reports"]) == 1
+    row = store["reports"][0]
+    payload_keys = set(row.keys()) - {"id", "created_at"}
+    assert payload_keys == {
+        "application_id",
+        "total_revenue",
+        "total_expenses",
+        "expense_ratio",
+        "average_order_value",
+        "risk_level",
+        "explanation",
+    }
+    assert row["application_id"] == "app-1"
+    assert row["total_revenue"] == 12500.0
+    assert row["total_expenses"] == 8000.0
+    assert row["expense_ratio"] == 0.64
+    assert row["average_order_value"] == 12500.0
+    assert row["risk_level"] == "LOW"
+    assert row["explanation"] == "Revenue totaled $12,500 with $8,000 in expenses."
+    assert "summary" not in row
+    assert "recommendation" not in row
+    assert "risk_flags" not in row
+    assert "metrics" not in row
+
+
+def test_report_row_for_api_maps_explanation_to_summary() -> None:
+    mapped = report_row_for_api(
+        {
+            "id": "report-1",
+            "application_id": "app-1",
+            "total_revenue": 12500.0,
+            "total_expenses": 8000.0,
+            "expense_ratio": 0.64,
+            "average_order_value": 12500.0,
+            "risk_level": "LOW",
+            "explanation": "Revenue totaled $12,500 with $8,000 in expenses.",
+        }
+    )
+    assert mapped is not None
+    assert mapped["explanation"] == "Revenue totaled $12,500 with $8,000 in expenses."
+    assert mapped["summary"] == "Revenue totaled $12,500 with $8,000 in expenses."
+    assert mapped["total_revenue"] == 12500.0
+    assert mapped["risk_level"] == "LOW"
+    assert report_row_for_api(None) is None
