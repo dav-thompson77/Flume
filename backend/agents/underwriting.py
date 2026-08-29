@@ -23,12 +23,13 @@ LOW_CONFIDENCE_THRESHOLD = 0.70
 ACTOR_TYPE_AI = "ai"
 ACTOR_NAME_UNDERWRITING_AGENT = "Underwriting Agent"
 
-# Live reports columns (FLUME.md §§16-17 + PostgREST):
-# application_id, total_revenue, total_expenses, expense_ratio, average_order_value,
-# risk_level, explanation. `summary` is not a column (PGRST204). Do not send it.
-# recommendation / risk_flags are FLUME.md assessment fields but are not in the
-# current insert; the AI recommendation is already stored on applications.status
-# and underwriting_actions.new_status.
+# Verified live reports columns:
+# id, application_id, total_revenue, total_expenses, expense_ratio,
+# average_order_value, risk_level, ai_recommendation, ai_summary,
+# human_decision, created_at.
+# Insert ai_recommendation and ai_summary. Omit id, created_at (defaults)
+# and human_decision (NULL until a human review endpoint exists).
+# Do not send explanation, summary, or a nested metrics object.
 
 
 class UnderwritingError(Exception):
@@ -102,6 +103,7 @@ def run_underwriting_agent(application_id: str) -> dict:
         application_id=application_id,
         metrics=metrics,
         risk_level=decision["risk_level"],
+        recommendation=new_status,
         summary=summary,
     )
 
@@ -364,7 +366,7 @@ def _result_from_existing(client, application_id: str, report: dict) -> dict:
         "previous_status": action.get("previous_status"),
         "new_status": action.get("new_status"),
         "reason": action.get("reason") or "",
-        "summary": report.get("explanation") or "",
+        "summary": report.get("ai_summary") or "",
     }
 
 
@@ -405,13 +407,15 @@ def _insert_audit_record(
 def report_row_for_api(row: dict | None) -> dict | None:
     """Map a reports table row to the GET /report JSON the frontend already reads.
 
-    The table stores the written analysis as `explanation`. The frontend
-    reads `summary`, so copy it there. Do not change frontend code.
+    Database columns stay as-is. The frontend reads `summary` and
+    `recommendation`, so copy ai_summary / ai_recommendation there.
+    expense_ratio is already the frontend field name.
     """
     if row is None:
         return None
     mapped = dict(row)
-    mapped["summary"] = mapped.get("explanation") or ""
+    mapped["summary"] = mapped.get("ai_summary") or ""
+    mapped["recommendation"] = mapped.get("ai_recommendation") or ""
     return mapped
 
 
@@ -421,6 +425,7 @@ def _insert_report(
     application_id: str,
     metrics: dict,
     risk_level: str,
+    recommendation: str,
     summary: str,
 ) -> None:
     row = {
@@ -430,7 +435,8 @@ def _insert_report(
         "expense_ratio": metrics["expense_ratio"],
         "average_order_value": metrics["average_order_value"],
         "risk_level": risk_level,
-        "explanation": summary,
+        "ai_recommendation": recommendation,
+        "ai_summary": summary,
     }
     result = _execute(
         client.table("reports").insert(row),

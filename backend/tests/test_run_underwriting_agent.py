@@ -159,9 +159,12 @@ def test_agent_writes_status_audit_and_report(mock_get_client) -> None:
     assert report["expense_ratio"] == 8000.0 / 12500.0
     assert report["average_order_value"] == 12500.0
     assert report["risk_level"] == "LOW"
-    assert "12,500" in report["explanation"]
-    assert "8,000" in report["explanation"]
+    assert report["ai_recommendation"] == "CLEAR_FOR_REVIEW"
+    assert "12,500" in report["ai_summary"]
+    assert "8,000" in report["ai_summary"]
     assert "summary" not in report
+    assert "explanation" not in report
+    assert "human_decision" not in report
     assert "12,500" in result["summary"]
     assert "8,000" in result["summary"]
 
@@ -184,7 +187,8 @@ def test_agent_is_idempotent_when_a_report_already_exists(mock_get_client) -> No
             "expense_ratio": 0.2,
             "average_order_value": 1000.0,
             "risk_level": "LOW",
-            "explanation": "Existing summary.",
+            "ai_recommendation": "CLEAR_FOR_REVIEW",
+            "ai_summary": "Existing summary.",
             "created_at": "2026-08-29T00:00:00Z",
         }
     ]
@@ -293,6 +297,7 @@ def test_report_insert_matches_reports_schema() -> None:
             "average_order_value": 12500.0,
         },
         risk_level="LOW",
+        recommendation="CLEAR_FOR_REVIEW",
         summary="Revenue totaled $12,500 with $8,000 in expenses.",
     )
 
@@ -306,7 +311,8 @@ def test_report_insert_matches_reports_schema() -> None:
         "expense_ratio",
         "average_order_value",
         "risk_level",
-        "explanation",
+        "ai_recommendation",
+        "ai_summary",
     }
     assert row["application_id"] == "app-1"
     assert row["total_revenue"] == 12500.0
@@ -314,14 +320,16 @@ def test_report_insert_matches_reports_schema() -> None:
     assert row["expense_ratio"] == 0.64
     assert row["average_order_value"] == 12500.0
     assert row["risk_level"] == "LOW"
-    assert row["explanation"] == "Revenue totaled $12,500 with $8,000 in expenses."
+    assert row["ai_recommendation"] == "CLEAR_FOR_REVIEW"
+    assert row["ai_summary"] == "Revenue totaled $12,500 with $8,000 in expenses."
     assert "summary" not in row
+    assert "explanation" not in row
     assert "recommendation" not in row
-    assert "risk_flags" not in row
+    assert "human_decision" not in row
     assert "metrics" not in row
 
 
-def test_report_row_for_api_maps_explanation_to_summary() -> None:
+def test_report_row_for_api_maps_live_columns_to_frontend() -> None:
     mapped = report_row_for_api(
         {
             "id": "report-1",
@@ -331,12 +339,17 @@ def test_report_row_for_api_maps_explanation_to_summary() -> None:
             "expense_ratio": 0.64,
             "average_order_value": 12500.0,
             "risk_level": "LOW",
-            "explanation": "Revenue totaled $12,500 with $8,000 in expenses.",
+            "ai_recommendation": "CLEAR_FOR_REVIEW",
+            "ai_summary": "Revenue totaled $12,500 with $8,000 in expenses.",
+            "human_decision": None,
         }
     )
     assert mapped is not None
-    assert mapped["explanation"] == "Revenue totaled $12,500 with $8,000 in expenses."
+    assert mapped["ai_summary"] == "Revenue totaled $12,500 with $8,000 in expenses."
     assert mapped["summary"] == "Revenue totaled $12,500 with $8,000 in expenses."
+    assert mapped["ai_recommendation"] == "CLEAR_FOR_REVIEW"
+    assert mapped["recommendation"] == "CLEAR_FOR_REVIEW"
+    assert mapped["expense_ratio"] == 0.64
     assert mapped["total_revenue"] == 12500.0
     assert mapped["risk_level"] == "LOW"
     assert report_row_for_api(None) is None
