@@ -118,7 +118,7 @@ Approve / Request More Review / Reject
 
 ## MVP Scope
 
-Flume is an AI-assisted underwriting prototype built for the Future Caribbean Global Agentic Buildathon.
+Flume is an AI-assisted underwriting prototype.
 
 The MVP focuses on turning unstructured merchant financial records into structured evidence that a human reviewer can use to make a faster, more informed underwriting decision.
 
